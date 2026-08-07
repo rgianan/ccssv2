@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"C:/projects/ccssv2\" 2>/dev/null; echo \"---\"; ls -la \"C:/projects/osds-participant-feedback-survey.7z\")",
+      "Bash(which 7z 7za 7zr py python 2>/dev/null; echo \"---\"; ls \"C:/Program Files/7-Zip/\" 2>/dev/null)",
+      "Bash(\"/c/Program Files/7-Zip/7z.exe\" x \"C:/projects/osds-participant-feedback-survey.7z\" -o\"C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/ref\" -y)",
+      "Bash(python -c ' *)",
+      "Bash(npm --version)",
+      "Bash(py --version)",
+      "Bash('/c/Program Files/7-Zip/7z.exe' x 'C:/Users/ginb/Downloads/Copy of coa_template.docx' -oC:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/coa -y)",
+      "Bash('/c/Program Files/7-Zip/7z.exe' x 'C:/Users/ginb/Downloads/CSM Summary Report OSDS 1st QUARTER.xlsx' -oC:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/csmxlsx -y)",
+      "Bash(node C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/dump.mjs C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad)",
+      "Bash(node C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/xlsx.mjs C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad)"
+    ]
+  }
+}

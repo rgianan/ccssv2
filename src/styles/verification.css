@@ -1,0 +1,135 @@
+.verification-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 50% 12%, #e3f1e8, transparent 42%), var(--cream);
+}
+.verification-shell {
+  max-width: 760px;
+  margin: auto;
+  padding: 56px 24px 80px;
+}
+.verification-intro {
+  text-align: center;
+  margin-bottom: 30px;
+}
+.verification-intro .eyebrow {
+  justify-content: center;
+}
+.verification-intro h1 {
+  font: 800 clamp(27px, 3.4vw, 38px) / 1.15 Manrope, sans-serif;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+.verification-intro p {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.7;
+  max-width: 520px;
+  margin: 0 auto;
+}
+.verification-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 30px;
+  box-shadow: var(--shadow);
+}
+.verification-card input {
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.verification-card .button {
+  width: 100%;
+}
+.verification-result {
+  display: flex;
+  gap: 15px;
+  align-items: start;
+  border-radius: 15px;
+  padding: 20px;
+  margin-top: 22px;
+}
+.verification-result > svg {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border-radius: 11px;
+}
+.verification-result.valid {
+  background: var(--green-soft);
+  border: 1px solid #c8e2d5;
+}
+.verification-result.valid > svg {
+  background: var(--green);
+  color: #fff;
+}
+.verification-result.invalid {
+  background: #fdeceb;
+  border: 1px solid #f2cfc7;
+}
+.verification-result.invalid > svg {
+  background: var(--danger);
+  color: #fff;
+}
+.verification-result span {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4d7264;
+}
+.verification-result.invalid span {
+  color: #9b453a;
+}
+.verification-result h2 {
+  margin: 6px 0 14px;
+  font: 800 20px Manrope, sans-serif;
+  color: var(--ink);
+}
+.verification-result p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #7a5049;
+}
+.verification-result dl {
+  margin: 0;
+  display: grid;
+  gap: 9px;
+}
+.verification-result dl > div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+}
+.verification-result dt {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5e7a6f;
+}
+.verification-result dd {
+  margin: 0;
+  font-size: 12.5px;
+  color: #2d4a41;
+  word-break: break-word;
+}
+.verification-result a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--green);
+}
+
+@media (max-width: 620px) {
+  .verification-card {
+    padding: 22px 18px;
+  }
+  .verification-result dl > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

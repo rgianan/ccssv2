@@ -1,0 +1,21 @@
+{
+  "name": "ched-osds-csm-portal",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:vercel": "npx --yes vercel dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "lucide-react": "1.27.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.0.4",
+    "vite": "8.1.5"
+  }
+}

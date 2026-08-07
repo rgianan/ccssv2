@@ -1,0 +1,112 @@
+import React, { useEffect, useRef } from "react";
+import { Languages } from "lucide-react";
+import { LANGUAGES } from "../lib/csm";
+import { navigate } from "../router";
+
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
+
+export const CHED_LOGO = "https://ik.imagekit.io/k2qmtccm6/CHED_Logo_New.png";
+
+export function TurnstileWidget({ action, onToken, resetKey = 0 }) {
+  const container = useRef(null),
+    widgetId = useRef(null);
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
+    let cancelled = false;
+    const render = () => {
+      if (cancelled || !container.current || !window.turnstile) return;
+      if (widgetId.current !== null) window.turnstile.remove(widgetId.current);
+      widgetId.current = window.turnstile.render(container.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        action,
+        theme: "light",
+        size: "flexible",
+        callback: onToken,
+        "expired-callback": () => onToken(""),
+        "error-callback": () => onToken(""),
+      });
+    };
+    if (window.turnstile) render();
+    else {
+      let script = document.querySelector('script[data-csm-turnstile="true"]');
+      if (!script) {
+        script = document.createElement("script");
+        script.src =
+          "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        script.async = true;
+        script.defer = true;
+        script.dataset.csmTurnstile = "true";
+        document.head.appendChild(script);
+      }
+      script.addEventListener("load", render, { once: true });
+    }
+    return () => {
+      cancelled = true;
+      if (widgetId.current !== null && window.turnstile)
+        window.turnstile.remove(widgetId.current);
+      widgetId.current = null;
+    };
+  }, [action, onToken, resetKey]);
+  if (!TURNSTILE_SITE_KEY)
+    return (
+      <div className="alert">
+        Turnstile is not configured. Add VITE_TURNSTILE_SITE_KEY in Vercel.
+      </div>
+    );
+  return <div className="turnstile-wrap" ref={container} />;
+}
+
+export function Brand({ subtitle = "Client Satisfaction Measurement", light = false }) {
+  return (
+    <a
+      className={`brand${light ? " light" : ""}`}
+      href="/"
+      onClick={(event) => {
+        event.preventDefault();
+        navigate("/");
+      }}
+      title="Return to the CHED-OSDS portal home page"
+    >
+      <img src={CHED_LOGO} alt="Commission on Higher Education logo" />
+      <span>
+        <strong>CHED&nbsp;·&nbsp;OSDS</strong>
+        <small>{subtitle}</small>
+      </span>
+    </a>
+  );
+}
+
+export function LanguageToggle({ language, onChange }) {
+  return (
+    <div className="language-toggle" role="group" aria-label="Form language">
+      <Languages size={15} />
+      {LANGUAGES.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={language === option.id ? "active" : ""}
+          onClick={() => onChange(option.id)}
+          title={`Show the form in ${option.label}`}
+        >
+          {option.short}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** English stays visible in Tagalog mode and vice versa, so a reader can always
+ *  fall back to the wording they recognize. */
+export function Bilingual({ entry, language, className = "" }) {
+  if (!entry) return null;
+  const primary = language === "tl" ? entry.tl || entry.en : entry.en;
+  const secondary = language === "tl" ? entry.en : entry.tl;
+  return (
+    <span className={`bilingual ${className}`}>
+      <span className="bilingual-primary">{primary}</span>
+      {secondary && secondary !== primary && (
+        <span className="bilingual-secondary">{secondary}</span>
+      )}
+    </span>
+  );
+}

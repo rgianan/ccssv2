@@ -46,6 +46,47 @@ function Feedback({ error, notice }) {
 
 const COA_STATUSES = ["REQUESTED", "ISSUED", "ERROR"];
 
+/**
+ * One key per unresolved issuance attempt, held in sessionStorage rather than
+ * in component state. The attempt this protects is the one that timed out, and
+ * the first thing an administrator does after a timeout is reload the page or
+ * switch tabs — either of which would discard an in-memory key and let the
+ * next click mint a second certificate and email the client twice.
+ */
+const ISSUE_KEY_STORE = "csm_coa_issue_keys";
+
+const readIssueKeys = () => {
+  try {
+    return JSON.parse(sessionStorage.getItem(ISSUE_KEY_STORE) || "{}") || {};
+  } catch {
+    return {};
+  }
+};
+const writeIssueKeys = (keys) => {
+  try {
+    sessionStorage.setItem(ISSUE_KEY_STORE, JSON.stringify(keys));
+  } catch {
+    /* a full or blocked store only costs us the retry guard, not the issuance */
+  }
+};
+const issueKeyFor = (referenceId) => {
+  const keys = readIssueKeys();
+  if (!keys[referenceId]) {
+    keys[referenceId] = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `coa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    writeIssueKeys(keys);
+  }
+  return keys[referenceId];
+};
+const clearIssueKey = (referenceId) => {
+  const keys = readIssueKeys();
+  if (keys[referenceId]) {
+    delete keys[referenceId];
+    writeIssueKeys(keys);
+  }
+};
+
 export function CertificatePanel({ onError }) {
   const [rows, setRows] = useState([]),
     [status, setStatus] = useState("REQUESTED"),
@@ -67,16 +108,20 @@ export function CertificatePanel({ onError }) {
   }, [status]);
 
   async function issue(row) {
+    if (busyId) return;
     setBusyId(row.referenceId);
     setError("");
     setNotice("");
     try {
-      const result = await generateCoa(row.referenceId);
+      const result = await generateCoa(row.referenceId, issueKeyFor(row.referenceId));
+      // Resolved, so a later deliberate reissue counts as a new attempt.
+      clearIssueKey(row.referenceId);
       setNotice(
-        `Certificate issued for ${row.coaName}. ${result.emailStatus || ""}`.trim(),
+        `${result.duplicate ? "Already issued" : "Certificate issued"} for ${row.coaName}. ${result.emailStatus || ""}`.trim(),
       );
       await load();
     } catch (issueError) {
+      // The key survives so the next click is recognised as the same attempt.
       setError(issueError.message);
     } finally {
       setBusyId("");
@@ -325,16 +370,27 @@ export function ReportsPanel({ period, onError }) {
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
 
+  // Guarded: switching period twice quickly must not let the abandoned request
+  // overwrite the current one, nor raise an error for results already gone.
   useEffect(() => {
+    let stale = false;
     setLoading(true);
     setNotice("");
     Promise.all([getServiceStats(period), getGeneratedReports()])
       .then(([serviceStats, generated]) => {
+        if (stale) return;
         setStats(serviceStats);
         setReports(generated);
       })
-      .catch(onError)
-      .finally(() => setLoading(false));
+      .catch((thrown) => {
+        if (!stale) onError(thrown);
+      })
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
   }, [period.type, period.year, period.quarter]);
 
   const updateStat = (serviceId, key, value) =>
@@ -367,9 +423,12 @@ export function ReportsPanel({ period, onError }) {
       // unsaved edit would silently not appear in the generated report.
       await saveServiceStats(period, stats);
       const report = await generateReport(period);
-      setNotice(`Report ready: ${report.name}`);
+      setNotice(`Report ready: ${report.name}. ${report.accessNote || ""}`.trim());
       setReports(await getGeneratedReports());
-      if (report.url) window.open(report.url, "_blank", "noreferrer");
+      // Opening is a convenience, not the record — the workbook is listed
+      // below either way, and accessNote explains a refused share.
+      if (report.url && !report.accessNote)
+        window.open(report.url, "_blank", "noreferrer");
     } catch (buildError) {
       setError(buildError.message);
     } finally {
@@ -1105,14 +1164,14 @@ export function AuditPanel({ onError }) {
         <article>
           <span>Visible events</span>
           <strong>{entries.length}</strong>
-          <i className="green">
+          <i className="brand">
             <ClipboardList />
           </i>
         </article>
         <article>
           <span>Successful logins</span>
           <strong>{logins}</strong>
-          <i className="blue">
+          <i className="teal">
             <ShieldCheck />
           </i>
         </article>
@@ -1199,8 +1258,23 @@ export function AuditPanel({ onError }) {
         </div>
         {data?.integrity && !data.integrity.valid && (
           <div className="audit-integrity-warning">
-            <ShieldCheck /> The audit hash chain does not match. A row may have
-            been edited or deleted directly in Google Sheets.
+            <ShieldCheck />
+            {data.integrity.dropped > 0 ? (
+              <>
+                {data.integrity.dropped} audit{" "}
+                {data.integrity.dropped === 1 ? "entry" : "entries"} could not be
+                written, so this log has known gaps
+                {data.integrity.droppedLast
+                  ? ` (most recently ${data.integrity.droppedLast})`
+                  : ""}
+                . Check the Apps Script executions log.
+              </>
+            ) : (
+              <>
+                The audit hash chain does not match. A row may have been edited
+                or deleted directly in Google Sheets.
+              </>
+            )}
           </div>
         )}
         <div className="table-scroll">

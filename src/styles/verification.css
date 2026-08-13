@@ -1,7 +1,7 @@
 .verification-page {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 50% 12%, #e3f1e8, transparent 42%), var(--cream);
+    radial-gradient(circle at 50% 12%, var(--wash), transparent 42%), var(--cream);
 }
 .verification-shell {
   max-width: 760px;
@@ -57,11 +57,11 @@
   border-radius: 11px;
 }
 .verification-result.valid {
-  background: var(--green-soft);
-  border: 1px solid #c8e2d5;
+  background: var(--blue-soft);
+  border: 1px solid #c9ddf2;
 }
 .verification-result.valid > svg {
-  background: var(--green);
+  background: var(--blue);
   color: #fff;
 }
 .verification-result.invalid {
@@ -77,7 +77,7 @@
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #4d7264;
+  color: #576a87;
 }
 .verification-result.invalid span {
   color: #9b453a;
@@ -106,12 +106,12 @@
 .verification-result dt {
   font-size: 11px;
   font-weight: 700;
-  color: #5e7a6f;
+  color: #64748b;
 }
 .verification-result dd {
   margin: 0;
   font-size: 12.5px;
-  color: #2d4a41;
+  color: #37435a;
   word-break: break-word;
 }
 .verification-result a {
@@ -121,7 +121,7 @@
   margin-top: 16px;
   font-size: 12px;
   font-weight: 800;
-  color: var(--green);
+  color: var(--blue);
 }
 
 @media (max-width: 620px) {

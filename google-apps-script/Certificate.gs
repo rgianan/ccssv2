@@ -50,10 +50,12 @@ function adminGetCoaRequests(filters, adminToken) {
 function findResponseRow_(referenceId) {
   referenceId = safeTrim_(referenceId);
   if (!referenceId) throw new Error('A response reference is required.');
-  var data = readResponses_();
-  var record = data.rows.filter(function (row) { return row.referenceId === referenceId; })[0];
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES);
+  if (!sh) throw new Error("Sheet 'Responses' not found. Run setupCsmSheets().");
+  var hdr = getHeaderMap_(sh), col = responseFieldColumns_(hdr);
+  var record = findResponseByColumn_(sh, col, col.referenceId, referenceId);
   if (!record) throw new Error('Response ' + referenceId + ' was not found.');
-  return { record: record, sheet: data.sheet, header: data.header };
+  return { record: record, sheet: sh, header: hdr };
 }
 
 function writeResponseCells_(sheet, header, rowIndex, values) {
@@ -83,6 +85,8 @@ function adminSaveCoaDetails(payload, adminToken) {
     coadatefrom: Utilities.formatDate(from, timezone_(), 'yyyy-MM-dd'),
     coadateto: to ? Utilities.formatDate(to, timezone_(), 'yyyy-MM-dd') : ''
   });
+  // These details are what /verification shows, so a cached answer is now stale.
+  invalidateCertificateCache_(found.record.verificationCode);
   return { status: 'OK', referenceId: found.record.referenceId };
 }
 
@@ -196,9 +200,48 @@ function driveExportPdf_(fileId) {
 
 // -------------------------------- Issuance -------------------------------------
 
-function adminGenerateCoa(responseId, adminToken) {
+/**
+ * Issuance is serialised. Two administrators releasing the same request, or
+ * one clicking again after the proxy's 60s timeout while the first pass is
+ * still running, would otherwise each mint a PDF and email the client.
+ */
+function adminGenerateCoa(responseId, issueKey, adminToken) {
   requireAdmin_(adminToken);
+  // Resolve the output folder before taking the lock: creating it writes to
+  // Settings, which acquires and releases this same script lock, and that
+  // nested release would drop the guard for the rest of the issuance.
+  var outputFolder = getOrCreateFolder_(COA_OUTPUT_FOLDER_SETTING, 'OSDS Certificates of Appearance');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(45000))
+    throw new Error('Another certificate is being issued right now. Wait a moment, then refresh the list before trying again.');
+  try {
+    return issueCoa_(responseId, safeTrim_(issueKey).slice(0, 64), outputFolder);
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function issueCoa_(responseId, issueKey, outputFolder) {
   var found = findResponseRow_(responseId), record = found.record;
+  // A reissue that fails must not erase the fact that a valid certificate is
+  // already in the client's hands, so remember what the register said first.
+  var previousStatus = record.coaStatus;
+
+  // The admin who saw the proxy time out clicks Generate again, and the click
+  // carries the key of the attempt that timed out. Reissuing is a real feature,
+  // so it cannot be blocked outright — but the same attempt, retried, hands
+  // back the certificate that already went out instead of minting a second one
+  // and emailing the client twice. A deliberate reissue arrives with a new key.
+  if (issueKey && record.coaIssueKey === issueKey && record.coaStatus === 'ISSUED')
+    return {
+      status: 'OK',
+      referenceId: record.referenceId,
+      certificateUrl: record.coaLink,
+      verificationCode: record.verificationCode,
+      emailStatus: 'This certificate was already issued and emailed on ' + (record.coaIssuedAt || 'an earlier attempt') + '.',
+      duplicate: true
+    };
+
   if (!record.coaRequested) throw new Error('This response did not request a Certificate of Appearance.');
   if (!record.coaName || !record.coaAgency || !record.coaPurpose || !record.coaDateFrom)
     throw new Error('Complete the certificate details before issuing.');
@@ -214,7 +257,6 @@ function adminGenerateCoa(responseId, adminToken) {
   SpreadsheetApp.flush();
 
   try {
-    var outputFolder = getOrCreateFolder_(COA_OUTPUT_FOLDER_SETTING, 'OSDS Certificates of Appearance');
     var issuedOn = new Date();
     var docName = ('COA - ' + record.coaName + ' - ' + record.referenceId).slice(0, 180);
     var docId = createCoaWorkingCopy_(templateId, docName, outputFolder);
@@ -222,6 +264,11 @@ function adminGenerateCoa(responseId, adminToken) {
     var verificationCode = record.verificationCode || makeVerificationCode_();
     var baseUrl = portalBaseUrl_();
     var verificationUrl = baseUrl ? baseUrl + '/verification?code=' + encodeURIComponent(verificationCode) : '';
+    // Worth saying out loud: without it the QR code and verification link are
+    // silently left blank on a document that is supposed to be checkable.
+    var setupNote = baseUrl
+      ? ''
+      : 'PORTAL_BASE_URL is not set in Vercel, so this certificate carries no QR code or verification link.';
 
     var doc = DocumentApp.openById(docId);
     replaceDocText_(doc, '{{title}}', record.coaTitle);
@@ -263,32 +310,54 @@ function adminGenerateCoa(responseId, adminToken) {
     var pdfBlob = driveExportPdf_(docId);
     pdfBlob.setName('Certificate of Appearance - ' + record.coaName + ' - ' + record.referenceId + '.pdf');
     var pdfFile = outputFolder.createFile(pdfBlob);
-    try { pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) {}
+    var sharingNote = shareFileByLink_(pdfFile);
     // The working Google Doc has served its purpose; the PDF is the record.
     try { DriveApp.getFileById(docId).setTrashed(true); } catch (_) {}
 
     var certificateUrl = pdfFile.getUrl();
-    var emailStatus = sendCoaEmail_(record, certificateUrl, verificationCode, verificationUrl, settings);
 
+    // Record the issuance before sending: a client must never be holding a
+    // certificate link that the office register still reports as unissued.
     writeResponseCells_(found.sheet, found.header, record.rowIndex, {
       coastatus: 'ISSUED',
       coalink: certificateUrl,
       coaissuedat: Utilities.formatDate(issuedOn, timezone_(), 'yyyy-MM-dd HH:mm'),
+      coaissuekey: issueKey,
       verificationcode: verificationCode,
       verificationurl: verificationUrl
     });
+    SpreadsheetApp.flush();
+    invalidateCertificateCache_(verificationCode);
+
+    // The certificate exists and is recorded; a mail failure is worth
+    // reporting but must not roll the record back to ERROR.
+    var emailStatus;
+    try {
+      emailStatus = sendCoaEmail_(record, certificateUrl, verificationCode, verificationUrl, settings);
+    } catch (mailError) {
+      emailStatus = 'The certificate was issued, but the email could not be sent (' +
+        String(mailError && mailError.message || mailError).slice(0, 160) +
+        '). Send the link manually.';
+    }
 
     return {
       status: 'OK',
       referenceId: record.referenceId,
       certificateUrl: certificateUrl,
       verificationCode: verificationCode,
-      emailStatus: emailStatus
+      emailStatus: safeTrim_([setupNote, sharingNote, emailStatus].join(' '))
     };
   } catch (error) {
+    // A failed first issuance leaves ERROR for the admin to act on. A failed
+    // reissue returns the row to ISSUED, because the earlier certificate and
+    // its link are still valid — and leaving PROCESSING would strand the row.
     writeResponseCells_(found.sheet, found.header, record.rowIndex, {
-      coastatus: 'ERROR: ' + String(error.message || error).slice(0, 400)
+      coastatus: previousStatus === 'ISSUED'
+        ? 'ISSUED'
+        : 'ERROR: ' + String(error.message || error).slice(0, 400)
     });
+    // Either way the cached verification answer may no longer match the row.
+    invalidateCertificateCache_(record.verificationCode);
     throw error;
   }
 }
@@ -356,14 +425,30 @@ function adminUploadSignature(fileObj, adminToken) {
 
 // ------------------------------ Verification ------------------------------------
 
+var COA_VERIFY_CACHE_PREFIX_ = 'COA_VERIFY_';
+
+/**
+ * Public and unauthenticated, so it must stay cheap: the malformed-code check
+ * costs nothing, a hit is served from cache, and a miss scans the verification
+ * code column alone rather than parsing the whole sheet.
+ */
 function verifyCertificate(code) {
   code = safeTrim_(code).toUpperCase();
   if (!/^OSDS-[A-F0-9]{20}$/.test(code)) return { valid: false };
-  var record = readResponses_().rows.filter(function (row) {
-    return row.verificationCode.toUpperCase() === code && row.coaStatus === 'ISSUED';
-  })[0];
-  if (!record) return { valid: false };
-  return {
+
+  var cache = CacheService.getScriptCache(), cacheKey = COA_VERIFY_CACHE_PREFIX_ + code;
+  var cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (_) {}
+  }
+
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES);
+  if (!sh) return { valid: false };
+  var col = responseFieldColumns_(getHeaderMap_(sh));
+  var record = findResponseByColumn_(sh, col, col.verificationCode, code);
+  if (!record || record.coaStatus !== 'ISSUED') return { valid: false };
+
+  var result = {
     valid: true,
     verificationCode: code,
     name: safeTrim_(record.coaTitle + ' ' + record.coaName),
@@ -373,4 +458,13 @@ function verifyCertificate(code) {
     issuedAt: record.coaIssuedAt,
     certificateUrl: record.coaLink
   };
+  // Only a positive is cached, and issuance clears it: a code that is not yet
+  // released must start verifying the moment it is.
+  try { cache.put(cacheKey, JSON.stringify(result), 21600); } catch (_) {}
+  return result;
+}
+
+function invalidateCertificateCache_(verificationCode) {
+  var code = safeTrim_(verificationCode).toUpperCase();
+  if (code) try { CacheService.getScriptCache().remove(COA_VERIFY_CACHE_PREFIX_ + code); } catch (_) {}
 }

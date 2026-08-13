@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 /**
  * Same-origin bridge between the browser and the Apps Script web app.
@@ -20,12 +20,31 @@ const send = (res, statusCode, payload) => {
   res.end(JSON.stringify(payload));
 };
 
-/** Turnstile rejects a token that was already redeemed unless the retry sends
- *  the same idempotency key, so derive one deterministically from the token. */
-const idempotencyKey = (token) => {
-  const hash = createHash("sha256").update(token).digest("hex").slice(0, 32);
+/**
+ * Turnstile only honours an already-redeemed token when the retry presents the
+ * same idempotency key, so the key has to be stable across the browser's
+ * retries of one submission — and unique to everything else.
+ *
+ * Deriving it from the token alone did the first but not the second: one
+ * solved challenge could then be replayed for unlimited submissions, which
+ * left the survey's only bot control doing nothing. Binding it to the
+ * submission satisfies both. A retry reuses the submission id and is admitted;
+ * a token replayed against a fresh submission presents a key Cloudflare has
+ * not seen and is rejected as spent.
+ */
+const idempotencyKey = (token, scope) => {
+  const hash = createHash("sha256")
+    .update(`${token}|${scope}`)
+    .digest("hex")
+    .slice(0, 32);
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 };
+
+/** Logins are never retried automatically, so each attempt stands alone. */
+const replayScopeFor = (payload) =>
+  payload.action === "submitResponse" && payload.payload?.submissionId
+    ? `submission:${String(payload.payload.submissionId).slice(0, 64)}`
+    : `nonce:${randomUUID()}`;
 
 function readBody(req) {
   if (typeof req.body === "string") return Promise.resolve(req.body);
@@ -102,7 +121,10 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             secret: turnstileSecret,
             response: turnstileToken,
-            idempotency_key: idempotencyKey(turnstileToken),
+            idempotency_key: idempotencyKey(
+              turnstileToken,
+              replayScopeFor(payload),
+            ),
             remoteip:
               req.headers["x-real-ip"] ||
               req.headers["x-forwarded-for"]?.split(",")[0]?.trim(),
@@ -127,10 +149,24 @@ export default async function handler(req, res) {
     }
 
     payload.proxyToken = sharedToken;
-    payload.portalBaseUrl = String(
-      process.env.PORTAL_BASE_URL ||
-        (req.headers.host ? `https://${req.headers.host}` : ""),
-    ).trim();
+    // Only the configured value, never the request's Host header. The backend
+    // stores whatever base URL it is handed and points every future
+    // certificate QR code and verification link at it, so a spoofed Host on a
+    // single unauthenticated call was enough to redirect verification to an
+    // attacker's domain permanently. An unset variable now sends nothing and
+    // the backend keeps what it already has.
+    const portalBaseUrl = String(process.env.PORTAL_BASE_URL || "")
+      .trim()
+      .replace(/\/+$/, "");
+    if (portalBaseUrl) {
+      if (!/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(portalBaseUrl))
+        return send(res, 500, {
+          ok: false,
+          error:
+            "PORTAL_BASE_URL is malformed. Set it to the portal origin, for example https://csm.ched.gov.ph — no path, no trailing slash.",
+        });
+      payload.portalBaseUrl = portalBaseUrl;
+    }
     payload.requestContext = {
       requestId: String(req.headers["x-vercel-id"] || "").slice(0, 100),
     };

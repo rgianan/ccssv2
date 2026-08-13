@@ -10,6 +10,39 @@ export const LANGUAGES = [
   { id: "tl", label: "Tagalog", short: "TL" },
 ];
 
+/**
+ * A response is dated by the office that receives it, not by the client's
+ * device. Apps Script formats and buckets every date in this zone (see
+ * appsscript.json), so the form has to offer the same day the backend would
+ * call today — `toISOString()` is UTC and lands on yesterday until 8am here,
+ * which pushes submissions into the previous quarter at a period boundary.
+ */
+export const PORTAL_TIME_ZONE = "Asia/Manila";
+
+const portalDateParts = (date) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: PORTAL_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return { year: value("year"), month: value("month"), day: value("day") };
+};
+
+/** yyyy-MM-dd in the portal's timezone — the shape the backend stores. */
+export const portalToday = (date = new Date()) => {
+  const { year, month, day } = portalDateParts(date);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+/** Calendar year and quarter (1-4) in the portal's timezone. */
+export const portalPeriodNow = (date = new Date()) => {
+  const { year, month } = portalDateParts(date);
+  return { year, quarter: String(Math.floor((month - 1) / 3) + 1) };
+};
+
 export const CLIENT_TYPES = [
   { value: "Citizen", en: "Citizen", tl: "Mamamayan" },
   { value: "Business", en: "Business", tl: "Negosyo" },

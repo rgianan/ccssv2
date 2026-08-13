@@ -91,9 +91,56 @@ function ensureReportsSheet_() {
   ]).sheet;
 }
 
+/**
+ * Serialised, and deliberately fails fast rather than queueing: building a
+ * workbook can outlast the 60s proxy timeout, and the administrator who sees
+ * that timeout will click Generate again while the first pass is still
+ * running. Without the lock that produced two workbooks for one period.
+ */
 function adminGenerateReport(periodInput, adminToken) {
   var session = requireAdmin_(adminToken);
-  var period = normalizePeriod_(periodInput);
+  // Resolve the output folder before taking the lock. Creating it writes to
+  // Settings, which acquires and then releases this same script lock, and that
+  // nested release would drop the guard for the rest of the build.
+  var folder = getOrCreateFolder_(REPORTS_FOLDER_SETTING, 'OSDS CSM Reports');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000))
+    throw new Error('A report is already being generated. Wait for it to finish, then check the list below before generating again.');
+  try {
+    return buildReport_(normalizePeriod_(periodInput), session.email, folder);
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/**
+ * The workbook's DATA sheet carries respondent email addresses, so it is
+ * shared with the portal's own administrators rather than published to anyone
+ * holding the link the way a client's certificate is.
+ */
+function shareReportWithAdmins_(file, actorEmail) {
+  var recipients = activeAdminEmails_(), actor = safeTrim_(actorEmail).toLowerCase();
+  if (actor && recipients.indexOf(actor) < 0) recipients.push(actor);
+
+  // The account running the script owns the file and already has access;
+  // Drive refuses to add an owner as a viewer, and counting that refusal as a
+  // failure would flag every report — the owner is almost always an admin too.
+  var owner = '';
+  try { owner = safeTrim_(file.getOwner() && file.getOwner().getEmail()).toLowerCase(); } catch (_) {}
+
+  var seen = {}, failed = [];
+  recipients.forEach(function (email) {
+    if (!email || email === owner || seen[email]) return;
+    seen[email] = true;
+    try { file.addViewer(email); } catch (_) { failed.push(email); }
+  });
+  return failed.length
+    ? 'The workbook was created, but access could not be granted to: ' + failed.join(', ') +
+      '. Share it from Drive, or check that these are Google accounts.'
+    : '';
+}
+
+function buildReport_(period, actorEmail, folder) {
   var settings = readSettings_();
   var services = readServices_();
   var records = readResponses_().rows.filter(function (record) { return inPeriod_(record, period); });
@@ -126,14 +173,18 @@ function adminGenerateReport(periodInput, adminToken) {
     if (defaultSheet && temporary.getSheets().length > 1) temporary.deleteSheet(defaultSheet);
     SpreadsheetApp.flush();
 
-    var folder = getOrCreateFolder_(REPORTS_FOLDER_SETTING, 'OSDS CSM Reports');
     var xlsx = exportSpreadsheetAsXlsx_(temporary.getId());
     xlsx.setName(workbookName + '.xlsx');
     var file = folder.createFile(xlsx);
 
+    var accessNote = shareReportWithAdmins_(file, actorEmail);
+
     var reportId = 'RPT-' + Utilities.getUuid().replace(/-/g,'').slice(0, 10).toUpperCase();
-    recordGeneratedReport_(reportId, file, period, session.email);
-    return { status: 'OK', report_id: reportId, name: file.getName(), url: file.getUrl(), period: period.key };
+    recordGeneratedReport_(reportId, file, period, actorEmail);
+    return {
+      status: 'OK', report_id: reportId, name: file.getName(),
+      url: file.getUrl(), period: period.key, accessNote: accessNote
+    };
   } finally {
     // The temporary Google Sheet is scaffolding; only the exported file is kept.
     try { DriveApp.getFileById(temporary.getId()).setTrashed(true); } catch (_) {}
@@ -182,13 +233,13 @@ function writeRow_(sheet, row, startColumn, values) {
 
 function styleHeaderRow_(sheet, row, startColumn, width) {
   sheet.getRange(row, startColumn, 1, width)
-    .setFontWeight('bold').setBackground('#d8efe5').setFontColor('#0b4b3c')
+    .setFontWeight('bold').setBackground('#d2e1f7').setFontColor('#0032a0')
     .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
 }
 
 function styleSectionRow_(sheet, row, width) {
   sheet.getRange(row, 1, 1, width)
-    .setFontWeight('bold').setBackground('#0b4b3c').setFontColor('#ffffff');
+    .setFontWeight('bold').setBackground('#0032a0').setFontColor('#ffffff');
 }
 
 function buildSummarySheet_(ss, period, settings, services, records, stats) {
@@ -198,7 +249,7 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
   sheet.getRange(1, 1, 1, width).merge()
     .setValue('CHED CLIENT SATISFACTION MEASUREMENT REPORT')
     .setFontSize(14).setFontWeight('bold').setHorizontalAlignment('center')
-    .setBackground('#0b4b3c').setFontColor('#ffffff');
+    .setBackground('#0032a0').setFontColor('#ffffff');
   sheet.getRange(3, 2).setValue('OFFICE:   ' + (settings.office_name || 'Office of Student Development and Services (OSDS)')).setFontWeight('bold');
   sheet.getRange(4, 2).setValue((period.type === 'year' ? 'PERIOD:   ' : 'QUARTER:   ') + period.label).setFontWeight('bold');
 
@@ -267,7 +318,7 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
   sheet.getRange(titleRow, 2).setValue('Service Name').setFontWeight('bold');
   sheet.getRange(titleRow, SQD_FIRST_COLUMN_, 1, SQD_DIMENSIONS_.length * 2).merge()
     .setValue('Nine (9) service dimensions rating (1-5 Likert Scale)')
-    .setFontWeight('bold').setHorizontalAlignment('center').setBackground('#eef5ed');
+    .setFontWeight('bold').setHorizontalAlignment('center').setBackground('#ebf4fc');
 
   SQD_DIMENSIONS_.forEach(function (dimension, index) {
     var column = SQD_FIRST_COLUMN_ + index * 2;
@@ -307,52 +358,61 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
       records: otherRecords
     });
 
+  // One setValues per row rather than 25 setValue calls: this loop and the
+  // per-service tallies were the bulk of a run that had to finish inside the
+  // proxy's 60s window.
+  var countOrBlank = function (value) {
+    return value === '' || value == null ? '' : Number(value);
+  };
   var dataRow = firstDataRow;
-  var meanMatrix = [], medianMatrix = [], overallScores = [];
+  var meanMatrix = [], medianMatrix = [];
   reportRows.forEach(function (entry, index) {
-    sheet.getRange(dataRow, 1).setValue(index + 1);
-    sheet.getRange(dataRow, 2).setValue(entry.name).setWrap(true);
-    var means = [], medians = [];
-    SQD_DIMENSIONS_.forEach(function (dimension, dimensionIndex) {
+    var means = [], medians = [], pairs = [];
+    SQD_DIMENSIONS_.forEach(function (dimension) {
       var values = entry.records.map(function (record) { return record[dimension.key]; });
       var mean = round2_(meanOf_(values)), median = round2_(medianOf_(values));
       means.push(mean);
       medians.push(median);
-      sheet.getRange(dataRow, SQD_FIRST_COLUMN_ + dimensionIndex * 2).setValue(mean);
-      sheet.getRange(dataRow, SQD_FIRST_COLUMN_ + dimensionIndex * 2 + 1).setValue(median);
+      pairs.push(mean, median);
     });
-    var scored = means.filter(function (value) { return value > 0; });
-    var overall = scored.length ? round2_(scored.reduce(function (a, b) { return a + b; }, 0) / scored.length) : 0;
-    overallScores.push(overall);
     meanMatrix.push(means);
     medianMatrix.push(medians);
-    sheet.getRange(dataRow, OVERALL_COLUMN_).setValue(overall);
-    sheet.getRange(dataRow, RESPONDENTS_COLUMN_).setValue(entry.records.length);
-    sheet.getRange(dataRow, CLIENTS_COLUMN_).setValue(entry.stat.clients === '' || entry.stat.clients == null ? '' : Number(entry.stat.clients));
-    sheet.getRange(dataRow, TRANSACTIONS_COLUMN_).setValue(entry.stat.transactions === '' || entry.stat.transactions == null ? '' : Number(entry.stat.transactions));
-    sheet.getRange(dataRow, REMARKS_COLUMN_).setValue(entry.stat.remarks || '').setWrap(true);
+    var values = [index + 1, entry.name].concat(pairs).concat([
+      overallScore_(entry.records),
+      entry.records.length,
+      countOrBlank(entry.stat.clients),
+      countOrBlank(entry.stat.transactions),
+      entry.stat.remarks || ''
+    ]);
+    sheet.getRange(dataRow, 1, 1, values.length).setValues([values]);
     dataRow++;
   });
+  if (reportRows.length) {
+    sheet.getRange(firstDataRow, 2, reportRows.length, 1).setWrap(true);
+    sheet.getRange(firstDataRow, REMARKS_COLUMN_, reportRows.length, 1).setWrap(true);
+  }
 
   var totalRow = dataRow;
-  sheet.getRange(totalRow, 2).setValue('OVERALL RATING').setFontWeight('bold');
+  var totals = ['', 'OVERALL RATING'];
   SQD_DIMENSIONS_.forEach(function (dimension, dimensionIndex) {
     var columnMeans = meanMatrix.map(function (means) { return means[dimensionIndex]; }).filter(function (value) { return value > 0; });
     var columnMedians = medianMatrix.map(function (medians) { return medians[dimensionIndex]; }).filter(function (value) { return value > 0; });
-    sheet.getRange(totalRow, SQD_FIRST_COLUMN_ + dimensionIndex * 2)
-      .setValue(columnMeans.length ? round2_(columnMeans.reduce(function (a, b) { return a + b; }, 0) / columnMeans.length) : 0);
-    sheet.getRange(totalRow, SQD_FIRST_COLUMN_ + dimensionIndex * 2 + 1)
-      .setValue(columnMedians.length ? round2_(medianOf_(columnMedians)) : 0);
+    totals.push(
+      columnMeans.length ? round2_(columnMeans.reduce(function (a, b) { return a + b; }, 0) / columnMeans.length) : 0,
+      columnMedians.length ? round2_(medianOf_(columnMedians)) : 0
+    );
   });
-  var scoredOverall = overallScores.filter(function (value) { return value > 0; });
-  sheet.getRange(totalRow, OVERALL_COLUMN_)
-    .setValue(scoredOverall.length ? round2_(scoredOverall.reduce(function (a, b) { return a + b; }, 0) / scoredOverall.length) : 0);
-  sheet.getRange(totalRow, RESPONDENTS_COLUMN_).setValue(records.length);
-  sheet.getRange(totalRow, CLIENTS_COLUMN_).setValue(
-    reportRows.reduce(function (sum, entry) { return sum + (Number(entry.stat.clients) || 0); }, 0));
-  sheet.getRange(totalRow, TRANSACTIONS_COLUMN_).setValue(
-    reportRows.reduce(function (sum, entry) { return sum + (Number(entry.stat.transactions) || 0); }, 0));
-  sheet.getRange(totalRow, 1, 1, width).setFontWeight('bold').setBackground('#eef5ed');
+  totals.push(
+    // Every respondent counts once, so a program with two respondents no
+    // longer moves this figure as far as one with two hundred.
+    overallScore_(records),
+    records.length,
+    reportRows.reduce(function (sum, entry) { return sum + (Number(entry.stat.clients) || 0); }, 0),
+    reportRows.reduce(function (sum, entry) { return sum + (Number(entry.stat.transactions) || 0); }, 0),
+    ''
+  );
+  sheet.getRange(totalRow, 1, 1, totals.length).setValues([totals]);
+  sheet.getRange(totalRow, 1, 1, width).setFontWeight('bold').setBackground('#ebf4fc');
   sheet.getRange(firstDataRow, SQD_FIRST_COLUMN_, totalRow - firstDataRow + 1, OVERALL_COLUMN_ - SQD_FIRST_COLUMN_ + 1)
     .setNumberFormat('0.00');
 
@@ -363,22 +423,23 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
   styleSectionRow_(sheet, feedbackRow, width);
   var suggestions = records.filter(function (record) { return record.suggestions; });
   if (suggestions.length) {
-    suggestions.forEach(function (record, index) {
-      sheet.getRange(feedbackRow + 1 + index, 2)
-        .setValue('• [' + record.serviceCode + '] ' + record.suggestions).setWrap(true);
-    });
+    sheet.getRange(feedbackRow + 1, 2, suggestions.length, 1)
+      .setValues(suggestions.map(function (record) {
+        return ['• [' + record.serviceCode + '] ' + record.suggestions];
+      }))
+      .setWrap(true);
   } else {
     sheet.getRange(feedbackRow + 1, 2).setValue('No written feedback was submitted for this period.').setFontStyle('italic');
   }
 
   var footnoteRow = feedbackRow + Math.max(suggestions.length, 1) + 2;
-  [
-    '¹No. of Respondents - refers to the number of clients that opted to rate the service received through the CSM questionnaire',
-    '²No. of Clients - refers to the number of clients served for the service',
-    '³Volume of Transactions - refers to the number of transactions that have been made for the service'
-  ].forEach(function (note, index) {
-    sheet.getRange(footnoteRow + index, 2).setValue(note).setFontSize(9).setFontColor('#6d7f79');
-  });
+  var footnotes = [
+    ['¹No. of Respondents - refers to the number of clients that opted to rate the service received through the CSM questionnaire'],
+    ['²No. of Clients - refers to the number of clients served for the service'],
+    ['³Volume of Transactions - refers to the number of transactions that have been made for the service']
+  ];
+  sheet.getRange(footnoteRow, 2, footnotes.length, 1).setValues(footnotes)
+    .setFontSize(9).setFontColor('#66748a');
 
   sheet.setColumnWidth(1, 34);
   sheet.setColumnWidth(2, 320);
@@ -416,48 +477,56 @@ function buildServiceSheet_(ss, period, settings, service, records) {
     .setFontWeight('bold').setHorizontalAlignment('center');
   sheet.getRange(6, 2, 2, 1).merge().setValue('SQD0')
     .setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
-  SQD_DIMENSIONS_.slice(1).forEach(function (dimension, index) {
-    sheet.getRange(6, 3 + index).setValue(dimension.dimension);
-    sheet.getRange(7, 3 + index).setValue(dimension.number);
-  });
+  var subHeaders = SQD_DIMENSIONS_.slice(1);
+  sheet.getRange(6, 3, 1, subHeaders.length)
+    .setValues([subHeaders.map(function (dimension) { return dimension.dimension; })]);
+  sheet.getRange(7, 3, 1, subHeaders.length)
+    .setValues([subHeaders.map(function (dimension) { return dimension.number; })]);
   styleHeaderRow_(sheet, 5, 1, 10);
   styleHeaderRow_(sheet, 6, 1, 10);
   styleHeaderRow_(sheet, 7, 1, 10);
 
   var firstDataRow = 8;
-  records.forEach(function (record, index) {
-    var row = [('Client ' + (index + 1))].concat(SQD_DIMENSIONS_.map(function (dimension) {
-      var value = Number(record[dimension.key]);
-      return value >= 1 && value <= 5 ? value : 'N/A';
-    }));
-    sheet.getRange(firstDataRow + index, 1, 1, row.length).setValues([row]);
-  });
+  if (records.length) {
+    var clientRows = records.map(function (record, index) {
+      return [('Client ' + (index + 1))].concat(SQD_DIMENSIONS_.map(function (dimension) {
+        var value = Number(record[dimension.key]);
+        return value >= 1 && value <= 5 ? value : 'N/A';
+      }));
+    });
+    sheet.getRange(firstDataRow, 1, clientRows.length, clientRows[0].length).setValues(clientRows);
+  }
 
   var meanRow = firstDataRow + Math.max(records.length, 1);
   var medianRow = meanRow + 1;
   sheet.getRange(meanRow, 1).setValue('Mean').setFontWeight('bold');
   sheet.getRange(medianRow, 1).setValue('Median').setFontWeight('bold');
-  SQD_DIMENSIONS_.forEach(function (dimension, index) {
+  var meanValues = [], medianValues = [];
+  SQD_DIMENSIONS_.forEach(function (dimension) {
     var values = records.map(function (record) { return record[dimension.key]; });
-    sheet.getRange(meanRow, 2 + index).setValue(round2_(meanOf_(values)));
-    sheet.getRange(medianRow, 2 + index).setValue(round2_(medianOf_(values)));
+    meanValues.push(round2_(meanOf_(values)));
+    medianValues.push(round2_(medianOf_(values)));
   });
-  sheet.getRange(meanRow, 2, 2, SQD_DIMENSIONS_.length).setNumberFormat('0.00')
-    .setFontWeight('bold').setBackground('#eef5ed');
+  sheet.getRange(meanRow, 2, 2, SQD_DIMENSIONS_.length)
+    .setValues([meanValues, medianValues])
+    .setNumberFormat('0.00').setFontWeight('bold').setBackground('#ebf4fc');
 
   var tallyRow = medianRow + 2;
   sheet.getRange(tallyRow, 1).setValue('In each SQD, how many clients have a rating of:').setFontWeight('bold');
-  ['5','4','3','2','1','0 or N/A'].forEach(function (rating, index) {
-    var row = tallyRow + 1 + index;
-    sheet.getRange(row, 1).setValue(rating);
-    SQD_DIMENSIONS_.forEach(function (dimension, dimensionIndex) {
-      var count = records.filter(function (record) {
+  var ratings = ['5','4','3','2','1','0 or N/A'];
+  var tally = ratings.map(function (rating) {
+    return SQD_DIMENSIONS_.map(function (dimension) {
+      return records.filter(function (record) {
         var value = safeTrim_(record[dimension.key]);
-        return rating === '0 or N/A' ? (value === 'N/A' || value === '' || value === '0') : value === rating;
+        return rating === '0 or N/A'
+          ? (value === 'N/A' || value === '' || value === '0')
+          : value === rating;
       }).length;
-      sheet.getRange(row, 2 + dimensionIndex).setValue(count);
     });
   });
+  sheet.getRange(tallyRow + 1, 1, ratings.length, 1)
+    .setValues(ratings.map(function (rating) { return [rating]; }));
+  sheet.getRange(tallyRow + 1, 2, tally.length, SQD_DIMENSIONS_.length).setValues(tally);
 
   var signRow = tallyRow + 9;
   [['Prepared by:', settings.report_prepared_by, settings.report_prepared_title, 1],
@@ -481,7 +550,7 @@ function buildDataSheet_(ss, records) {
     }))
     .concat(['Email','Comments/Suggestions','Reference','Transaction Date']);
   sheet.getRange(1, 1, 1, headers.length).setValues([headers])
-    .setFontWeight('bold').setBackground('#0b4b3c').setFontColor('#ffffff').setWrap(true);
+    .setFontWeight('bold').setBackground('#0032a0').setFontColor('#ffffff').setWrap(true);
 
   if (records.length) {
     var rows = records.map(function (record) {

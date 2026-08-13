@@ -150,8 +150,8 @@ export const getCoaRequests = (filters = {}) =>
   adminCall("adminGetCoaRequests", { filters });
 export const saveCoaDetails = (payload) =>
   adminCall("adminSaveCoaDetails", { payload });
-export const generateCoa = (responseId) =>
-  adminCall("adminGenerateCoa", { responseId });
+export const generateCoa = (responseId, issueKey) =>
+  adminCall("adminGenerateCoa", { responseId, issueKey });
 
 export const getAdminServices = () => adminCall("adminGetServices");
 export const saveAdminService = (payload) =>

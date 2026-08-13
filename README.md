@@ -77,9 +77,12 @@ runs `vercel dev` so `/api/gas-proxy` is served alongside the app.
    **Show "appsscript.json" manifest file** in project settings first).
 3. Run `setupCsmSheets()` once. It creates `Responses`, `Services`,
    `ServiceStats`, `Settings`, `Reports`, `Users`, `Whitelist`, and `Audit`,
-   seeds the four main programs plus Other Services, and authorizes the Sheets,
-   Drive, Docs, mail, and external-request scopes. It is safe to run again after
-   an update — existing rows and recognized columns are preserved.
+   seeds the four main programs plus Other Services, installs a daily
+   `pruneAdminSessions` trigger, and authorizes the Sheets, Drive, Docs, mail,
+   and external-request scopes. It is safe to run again after an update —
+   existing rows and recognized columns are preserved, missing columns are
+   added, and the trigger is not duplicated. **Re-run it after pulling an
+   update**, so new columns such as `SubmissionID` and `COAIssueKey` exist.
 4. Run `setupCsmSecurity()` (or `logSubmitSharedToken()` to see the value in the
    execution log). Copy `submitSharedToken` — Apps Script keeps only its hash.
 5. Edit the host account inside `seedUsers()`, replacing the email and
@@ -113,11 +116,16 @@ outside the dev server.
 
 Create a Cloudflare Turnstile widget for the production hostname. Client
 submissions and admin logins are rejected by the proxy unless Cloudflare
-validates a fresh, single-use token for the expected action and hostname.
+validates a fresh token for the expected action and hostname. A token is bound
+to the submission it was solved for, so the browser may retry that submission
+but the same token cannot be replayed against a different one.
 
-`PORTAL_BASE_URL` is what certificate QR codes and verification links point at.
-The proxy also forwards the request host, so the backend learns the URL on the
-first request even before you set the variable.
+`PORTAL_BASE_URL` is what certificate QR codes and verification links point at,
+and it is **required** — set it to the portal origin with no path and no
+trailing slash, for example `https://csm.ched.gov.ph`. The proxy forwards only
+this configured value and never the request's `Host` header, so a spoofed host
+cannot repoint verification at another domain. Until it is set, certificates
+are issued without a QR code or verification link and the admin module says so.
 
 ## Certificate of Appearance
 
@@ -173,6 +181,9 @@ Generated workbooks are stored in Drive and listed on the Reports page.
   only its SHA-256 hash.
 - Admin passwords are salted and iterated SHA-256, never stored in plain text.
   Sessions expire after six hours and logins throttle after five failures.
+  Expired sessions are swept on each sign-in and by the daily
+  `pruneAdminSessions` trigger, so the script property store cannot fill up and
+  start refusing new sign-ins.
 - The `Audit` sheet records logins, program changes, settings changes,
   certificate issuance, report generation, and user changes as an HMAC hash
   chain, so a row edited or deleted directly in Sheets is reported in the UI.

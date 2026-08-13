@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   ClipboardList,
@@ -41,8 +41,18 @@ function AdminLogin({ onAuthenticated }) {
     [error, setError] = useState(""),
     [turnstileToken, setTurnstileToken] = useState(""),
     [turnstileReset, setTurnstileReset] = useState(0);
+  /**
+   * A ref, not the `busy` flag: two clicks landing in the same tick both read
+   * the pre-render state and both submit. Each attempt is scoped to its own
+   * server-side nonce — necessarily, or a solved challenge could be replayed
+   * for unlimited password guesses — so the second request would be rejected
+   * as a spent token and show the user a security error for a double-click.
+   */
+  const submitting = useRef(false);
   async function submit(event) {
     event.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError("");
     try {
@@ -54,6 +64,7 @@ function AdminLogin({ onAuthenticated }) {
       setTurnstileToken("");
       setTurnstileReset((value) => value + 1);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -277,11 +288,21 @@ function OverviewPanel({ period, onError }) {
   const [data, setData] = useState(null),
     [loading, setLoading] = useState(true);
   useEffect(() => {
+    let stale = false;
     setLoading(true);
     getAdminOverview(period)
-      .then(setData)
-      .catch(onError)
-      .finally(() => setLoading(false));
+      .then((result) => {
+        if (!stale) setData(result);
+      })
+      .catch((thrown) => {
+        if (!stale) onError(thrown);
+      })
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
   }, [period.type, period.year, period.quarter]);
 
   if (loading && !data)
@@ -295,7 +316,7 @@ function OverviewPanel({ period, onError }) {
         <article>
           <span>Responses · {describePeriod(period)}</span>
           <strong>{data?.totalResponses ?? 0}</strong>
-          <i className="green">
+          <i className="brand">
             <Inbox />
           </i>
         </article>
@@ -313,14 +334,14 @@ function OverviewPanel({ period, onError }) {
           <small className="stat-note">
             {data?.coa?.pending ?? 0} awaiting release (all periods)
           </small>
-          <i className="blue">
+          <i className="teal">
             <FileSignature />
           </i>
         </article>
         <article>
           <span>Aware of the Citizen's Charter</span>
           <strong>{data?.ccAwareness ? `${data.ccAwareness}%` : "—"}</strong>
-          <i className="green">
+          <i className="brand">
             <ShieldCheck />
           </i>
         </article>
@@ -451,43 +472,94 @@ function OverviewPanel({ period, onError }) {
   );
 }
 
+const PAGE_SIZE = 100;
+
 function ResponsesPanel({ onError }) {
-  const [rows, setRows] = useState([]),
+  const [data, setData] = useState({ rows: [], total: 0, offset: 0 }),
     [query, setQuery] = useState(""),
+    [draftQuery, setDraftQuery] = useState(""),
+    [offset, setOffset] = useState(0),
     [loading, setLoading] = useState(true),
     [expanded, setExpanded] = useState("");
+
+  // The sheet is the source of truth for both filtering and paging, so the
+  // count on screen is the real number of matches rather than however many
+  // rows happened to fit in the last fetch.
   useEffect(() => {
-    getAdminResponses({ limit: 500 })
-      .then(setRows)
-      .catch(onError)
-      .finally(() => setLoading(false));
-  }, []);
-  const filtered = useMemo(
-    () =>
-      rows.filter((row) =>
-        [row.referenceId, row.email, row.serviceName, row.region, row.clientType]
-          .join(" ")
-          .toLowerCase()
-          .includes(query.toLowerCase()),
-      ),
-    [rows, query],
-  );
-  if (loading) return <section className="panel-loading">Loading responses…</section>;
+    let stale = false;
+    setLoading(true);
+    getAdminResponses({ query, offset, limit: PAGE_SIZE })
+      .then((result) => {
+        if (!stale) setData(result);
+      })
+      .catch((thrown) => {
+        // A superseded request must not raise a banner — or, since
+        // handleError signs out on authorization-shaped messages, drop the
+        // administrator to the login screen mid-navigation.
+        if (!stale) onError(thrown);
+      })
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [query, offset]);
+
+  const rows = data.rows || [];
+  const total = data.total || 0;
+  const firstShown = total ? offset + 1 : 0;
+  const lastShown = Math.min(offset + PAGE_SIZE, total);
+
+  const search = (event) => {
+    event.preventDefault();
+    setExpanded("");
+    setOffset(0);
+    setQuery(draftQuery.trim());
+  };
+
+  if (loading && !rows.length)
+    return <section className="panel-loading">Loading responses…</section>;
   return (
     <section className="table-card">
       <div className="table-tools">
         <div>
-          <h2>All responses</h2>
-          <p>{filtered.length} records</p>
+          <h2>{query ? "Matching responses" : "All responses"}</h2>
+          <p>
+            {total
+              ? `Showing ${firstShown}–${lastShown} of ${total.toLocaleString()} records`
+              : "No records"}
+            {query && " · filtered"}
+          </p>
         </div>
-        <label className="search">
+        <form className="search" onSubmit={search}>
           <Search />
           <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            value={draftQuery}
+            onChange={(event) => setDraftQuery(event.target.value)}
             placeholder="Search reference, email, program…"
+            aria-label="Search responses"
           />
-        </label>
+          {/* Filtering happens on the server now, so the search needs a visible
+              trigger — pressing Enter is not a discoverable affordance. */}
+          <button className="mini-button" title="Search every response">
+            Search
+          </button>
+          {query && (
+            <button
+              type="button"
+              className="mini-button"
+              onClick={() => {
+                setDraftQuery("");
+                setOffset(0);
+                setQuery("");
+              }}
+              title="Clear the search"
+            >
+              Clear
+            </button>
+          )}
+        </form>
       </div>
       <div className="table-scroll">
         <table>
@@ -504,7 +576,7 @@ function ResponsesPanel({ onError }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((row) => (
+            {rows.map((row) => (
               <React.Fragment key={row.referenceId}>
                 <tr>
                   <td>
@@ -572,16 +644,47 @@ function ResponsesPanel({ onError }) {
                 )}
               </React.Fragment>
             ))}
-            {!filtered.length && (
+            {!rows.length && (
               <tr>
                 <td colSpan={8} className="empty-cell">
-                  No responses match this search.
+                  {query
+                    ? "No responses match this search."
+                    : "No responses recorded yet."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      {total > PAGE_SIZE && (
+        <div className="pager">
+          <button
+            className="mini-button"
+            disabled={offset === 0 || loading}
+            onClick={() => {
+              setExpanded("");
+              setOffset(Math.max(0, offset - PAGE_SIZE));
+            }}
+            title="Show the previous page"
+          >
+            Previous
+          </button>
+          <span>
+            {firstShown}–{lastShown} of {total.toLocaleString()}
+          </span>
+          <button
+            className="mini-button"
+            disabled={lastShown >= total || loading}
+            onClick={() => {
+              setExpanded("");
+              setOffset(offset + PAGE_SIZE);
+            }}
+            title="Show the next page"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </section>
   );
 }

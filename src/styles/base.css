@@ -3,22 +3,44 @@
    serializing three round trips before first paint. */
 :root {
   font-family: "DM Sans", system-ui, sans-serif;
-  color: #18322d;
-  background: #f5f7f2;
+  color: #16223c;
+  background: #f5f8fc;
   font-synthesis: none;
-  --green: #0b4b3c;
-  --green-deep: #073d31;
-  --green-soft: #eaf4ee;
-  --mint: #d8efe5;
-  --gold: #b8862b;
+  /* Royal Blue and its ramp. Tones were derived in OKLCH so each step keeps
+     the perceived lightness of the tone it replaced; hue leans indigo in the
+     darks and azure in the lights, the way a real pigment cools as it thins. */
+  --blue-abyss: #001543; /* sidebar gradient floor */
+  --blue-deep: #001b5e; /* deep surfaces, brand gradient start */
+  --blue: #0032a0; /* Royal Blue — the primary */
+  --blue-lift: #2a63d8; /* brand gradient end */
+  --azure: #4a8cf0; /* accent gradient end; decorative only, 3.3:1 on white */
+  --sky: #d2e1f7; /* strong tint: table heads, report fills */
+  --blue-soft: #e9f0fd; /* soft surface */
+  --wash: #e3ecfb; /* ambient page tint */
+
+  /* Gradients. Three jobs, three ramps — anything else is a fourth variant.
+     Composed from the tones above rather than repeating their hex values, so
+     editing a tone changes the gradients that are named after it. */
+  --grad-brand: linear-gradient(
+    135deg,
+    var(--blue-deep),
+    var(--blue) 58%,
+    var(--blue-lift)
+  );
+  --grad-shell: linear-gradient(120deg, var(--blue-abyss), var(--blue));
+  --grad-accent: linear-gradient(90deg, var(--blue), var(--azure));
+
+  --gold: #b8862b; /* unchanged: royal blue's classic partner */
   --gold-soft: #fdf4e0;
-  --cream: #f5f7f2;
-  --border: #dfe7e1;
-  --muted: #6d7f79;
-  --ink: #143f34;
+  --teal: #0f6f85; /* tertiary accent, kept clear of the primary */
+  --teal-soft: #e2f2f7;
+  --cream: #f5f8fc;
+  --border: #dae2ec;
+  --muted: #66748a;
+  --ink: #1e2c48;
   --danger: #a44335;
-  --shadow-sm: 0 4px 14px rgba(15, 55, 44, 0.06);
-  --shadow: 0 24px 64px rgba(15, 55, 44, 0.11);
+  --shadow-sm: 0 4px 14px rgba(12, 32, 80, 0.07);
+  --shadow: 0 24px 64px rgba(12, 32, 80, 0.13);
 }
 * {
   box-sizing: border-box;
@@ -53,7 +75,7 @@ h3 {
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
-  background: #eef3ee;
+  background: #edf2f8;
   border-radius: 5px;
   padding: 1px 5px;
 }
@@ -70,7 +92,7 @@ code {
   text-transform: uppercase;
   letter-spacing: 0.15em;
   font-weight: 800;
-  color: #36836c;
+  color: #5074a9;
   font-size: 11px;
   margin: 0 0 12px;
   display: flex;
@@ -96,33 +118,33 @@ code {
   border-radius: 13px;
 }
 .button.primary {
-  background: var(--green);
+  background: var(--blue);
   color: #fff;
   box-shadow: 0 9px 20px rgba(11, 75, 60, 0.18);
 }
 .button.primary:hover:not(:disabled) {
-  background: var(--green-deep);
+  background: var(--blue-deep);
   transform: translateY(-1px);
 }
 .button.secondary {
   background: #fff;
   border: 1px solid var(--border);
-  color: #33534b;
+  color: #3e4c64;
 }
 .button.secondary:hover:not(:disabled) {
-  border-color: #9dbcae;
+  border-color: #a1b6cf;
 }
 .button.outline {
   background: transparent;
-  border: 1.5px solid var(--green);
-  color: var(--green);
+  border: 1.5px solid var(--blue);
+  color: var(--blue);
 }
 .button.outline:hover:not(:disabled) {
-  background: var(--green-soft);
+  background: var(--blue-soft);
 }
 .button.ghost {
   background: transparent;
-  color: #60716c;
+  color: #646d7b;
 }
 .button:disabled {
   opacity: 0.45;
@@ -137,17 +159,17 @@ code {
   padding: 6px 10px;
   font-size: 11px;
   font-weight: 700;
-  color: #496159;
+  color: #505c6f;
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 .mini-button:hover:not(:disabled) {
-  border-color: #9dbcae;
+  border-color: #a1b6cf;
 }
 .mini-button.primary {
-  background: var(--green);
-  border-color: var(--green);
+  background: var(--blue);
+  border-color: var(--blue);
   color: #fff;
 }
 .mini-button:disabled {
@@ -165,9 +187,9 @@ code {
   margin: 6px 0;
 }
 .notice {
-  background: var(--green-soft);
-  color: #2c6b56;
-  border: 1px solid #c8e2d5;
+  background: var(--blue-soft);
+  color: #425e8b;
+  border: 1px solid #c9ddf2;
   border-radius: 10px;
   padding: 11px 13px;
   font-size: 12px;
@@ -195,7 +217,7 @@ code {
 }
 .brand strong {
   font: 800 14px Manrope, sans-serif;
-  color: var(--green);
+  color: var(--blue);
 }
 .brand small {
   font-size: 11px;
@@ -205,7 +227,7 @@ code {
   color: #fff;
 }
 .brand.light small {
-  color: #9fc2b7;
+  color: #a5bcd6;
 }
 
 .language-toggle {
@@ -228,7 +250,7 @@ code {
   color: var(--muted);
 }
 .language-toggle button.active {
-  background: var(--green);
+  background: var(--blue);
   color: #fff;
 }
 
@@ -244,7 +266,7 @@ code {
   font-size: 11px;
   font-weight: 500;
   font-style: italic;
-  color: #8b9a95;
+  color: #8e97a3;
   line-height: 1.4;
 }
 
@@ -273,12 +295,12 @@ code {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--green);
+  color: var(--blue);
   padding: 9px 13px;
   border-radius: 10px;
 }
 .topbar-link:hover {
-  background: var(--mint);
+  background: var(--sky);
 }
 
 /* ----------------------------- Form controls ----------------------------- */
@@ -288,7 +310,7 @@ label {
   font-weight: 700;
   font-size: 13px;
   margin: 0 0 20px;
-  color: #29463f;
+  color: #343f55;
 }
 label b {
   color: #d56955;
@@ -299,27 +321,27 @@ textarea {
   display: block;
   width: 100%;
   margin-top: 8px;
-  border: 1px solid #d7e0da;
+  border: 1px solid #d7dee6;
   border-radius: 11px;
   padding: 13px 14px;
   background: #fff;
-  color: #18322d;
+  color: #16223c;
   outline: 0;
 }
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: #4a8b73;
+  border-color: #5b7eae;
   box-shadow: 0 0 0 3px rgba(74, 139, 115, 0.13);
 }
 input:disabled,
 select:disabled {
   background: #f4f6f4;
-  color: #8b9a95;
+  color: #8e97a3;
 }
 label small {
   display: block;
-  color: #84908c;
+  color: #868e97;
   font-weight: 400;
   margin-top: 6px;
   font-size: 11px;
@@ -342,7 +364,7 @@ textarea {
   top: 21px;
   width: 17px;
   pointer-events: none;
-  color: #7d8d87;
+  color: #808a97;
 }
 .select-wrap.compact select {
   margin-top: 0;

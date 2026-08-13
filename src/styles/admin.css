@@ -4,7 +4,7 @@
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(circle at 50% 18%, #e3f1e8, transparent 40%), var(--cream);
+    radial-gradient(circle at 50% 18%, var(--wash), transparent 40%), var(--cream);
 }
 .admin-login-card {
   width: min(430px, 100%);
@@ -46,10 +46,10 @@
   min-height: 100vh;
   display: grid;
   grid-template-columns: 248px 1fr;
-  background: #f4f6f2;
+  background: #f2f6f9;
 }
 .admin-layout > aside {
-  background: #0a4135;
+  background: #001b5e;
   color: #fff;
   padding: 26px 18px;
   position: fixed;
@@ -76,7 +76,7 @@
   align-items: center;
   font-size: 13px;
   font-weight: 700;
-  color: #b9d1c9;
+  color: #bccddf;
 }
 .admin-layout nav svg {
   width: 17px;
@@ -106,8 +106,9 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #d7e7a1;
-  color: #264c3d;
+  /* The one warm note on a deep blue sidebar, as the lime chip was on green. */
+  background: #e3b95f;
+  color: #40300a;
   display: grid;
   place-items: center;
   font-weight: 800;
@@ -128,7 +129,7 @@
   font-size: 12px;
 }
 .admin-profile small {
-  color: #9fc2b7;
+  color: #a5bcd6;
   font-size: 10px;
   margin-top: 2px;
 }
@@ -136,7 +137,7 @@
   margin-left: auto;
   border: 0;
   background: transparent;
-  color: #9fc2b7;
+  color: #a5bcd6;
   padding: 6px;
 }
 .profile-logout:hover {
@@ -252,17 +253,19 @@
 .stats i svg {
   width: 18px;
 }
-.stats .green {
-  background: #e4f2e9;
-  color: #37755f;
+/* Three accents, deliberately distinct: the primary, the warm accent, and a
+   teal that cannot be mistaken for the primary the way the old blue could. */
+.stats .brand {
+  background: #e4effa;
+  color: #1246b0;
 }
 .stats .gold {
   background: #fff2d6;
   color: #ab7620;
 }
-.stats .blue {
-  background: #e6eff8;
-  color: #3c6e9d;
+.stats .teal {
+  background: var(--teal-soft);
+  color: var(--teal);
 }
 
 .stacked {
@@ -323,8 +326,8 @@ form.panel {
   justify-content: space-between;
   gap: 24px;
   flex-wrap: wrap;
-  background: linear-gradient(120deg, #0a4135, #17654e);
-  border-color: #0a4135;
+  background: var(--grad-shell);
+  border-color: #001b5e;
   color: #fff;
   padding: 28px;
 }
@@ -334,32 +337,50 @@ form.panel {
 }
 .generate-panel p {
   margin: 0;
-  color: #cfe4d9;
+  color: #d0e0f1;
   font-size: 13px;
   line-height: 1.65;
   max-width: 60ch;
 }
 .generate-panel .button.primary {
   background: #fff;
-  color: var(--green);
+  color: var(--blue);
 }
 
 .search {
   position: relative;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 .search svg {
   position: absolute;
   left: 11px;
   top: 12px;
   width: 16px;
-  color: #82918c;
+  color: #858e9a;
 }
 .search input {
   margin: 0;
   width: 270px;
   padding: 9px 12px 9px 36px;
   font-size: 12px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 13px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: #576375;
+}
+.pager button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .filter-bar {
@@ -375,11 +396,11 @@ form.panel {
   padding: 8px 15px;
   font-size: 12px;
   font-weight: 700;
-  color: #52685f;
+  color: #576375;
 }
 .filter-bar > button.active {
-  background: var(--green);
-  border-color: var(--green);
+  background: var(--blue);
+  border-color: var(--blue);
   color: #fff;
 }
 .push-right {
@@ -398,8 +419,8 @@ table {
 }
 th {
   text-align: left;
-  background: #f8faf7;
-  color: #74827e;
+  background: #f7fafd;
+  color: #777f8a;
   text-transform: uppercase;
   font-size: 9px;
   letter-spacing: 0.09em;
@@ -408,9 +429,9 @@ th {
 }
 td {
   padding: 14px 16px;
-  border-top: 1px solid #edf0ed;
+  border-top: 1px solid #eceff3;
   font-size: 12px;
-  color: #40564f;
+  color: #475163;
   vertical-align: top;
 }
 td strong,
@@ -418,11 +439,11 @@ td small {
   display: block;
 }
 td strong {
-  color: #1f4037;
+  color: #2c3951;
   font-size: 12px;
 }
 td small {
-  color: #88938f;
+  color: #8a919a;
   margin-top: 3px;
   font-size: 10px;
   line-height: 1.5;
@@ -471,7 +492,7 @@ td small {
   padding: 7px 9px;
 }
 .answer-grid b {
-  color: var(--green);
+  color: var(--blue);
   font-size: 9.5px;
   letter-spacing: 0.06em;
 }
@@ -479,7 +500,7 @@ td small {
   margin: 12px 0 0;
   font-size: 12px;
   line-height: 1.65;
-  color: #4a5f58;
+  color: #505a6b;
 }
 
 .status-pill {
@@ -491,8 +512,8 @@ td small {
   letter-spacing: 0.05em;
 }
 .status-pill.enabled {
-  background: #e7f4eb;
-  color: #377258;
+  background: #e6f2fd;
+  color: #476594;
 }
 .status-pill.pending {
   background: #fff2d6;
@@ -503,8 +524,8 @@ td small {
   color: #a44335;
 }
 .status-pill.disabled {
-  background: #eef1ef;
-  color: #7c8a85;
+  background: #eef0f3;
+  color: #7f8792;
 }
 
 /* ------------------------------- Bar charts ------------------------------- */
@@ -526,24 +547,24 @@ td small {
   display: flex;
   flex-direction: column;
   font-size: 11px;
-  color: #52685f;
+  color: #576375;
 }
 .bar-label b {
   font-size: 9.5px;
-  color: var(--green);
+  color: var(--blue);
   letter-spacing: 0.06em;
 }
 .bar-track {
   height: 9px;
   border-radius: 999px;
-  background: #eef2ee;
+  background: #edf1f6;
   overflow: hidden;
 }
 .bar-track i {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--green), #7ba75f);
+  background: var(--grad-accent);
   transition: width 0.4s;
 }
 .bar-value {
@@ -561,7 +582,7 @@ td small {
 .cc-grid h3,
 .demo-grid h3 {
   font-size: 11px;
-  color: var(--green);
+  color: var(--blue);
   margin: 0 0 9px;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -580,9 +601,9 @@ td small {
   justify-content: space-between;
   gap: 10px;
   font-size: 11.5px;
-  color: #55685f;
+  color: #596474;
   padding: 6px 9px;
-  background: #f8faf7;
+  background: #f7fafd;
   border-radius: 7px;
 }
 .cc-grid b,
@@ -624,7 +645,7 @@ td small {
 .modal header > button {
   border: 0;
   background: transparent;
-  color: #71817b;
+  color: #747e8b;
   padding: 4px;
 }
 .modal-body {
@@ -664,20 +685,20 @@ td small {
 }
 .upload {
   position: relative;
-  border: 1px dashed #9db5aa;
+  border: 1px dashed #a0b0c4;
   border-radius: 12px;
   padding: 16px;
   display: flex;
   gap: 12px;
   align-items: center;
-  background: #f8fbf8;
+  background: #f7fbfe;
   margin: 0;
 }
 .upload > svg {
   flex: none;
   padding: 8px;
-  background: #e3f0e6;
-  color: #39745d;
+  background: #e1eefa;
+  color: #4a6794;
   width: 39px;
   height: 39px;
   border-radius: 10px;
@@ -743,7 +764,7 @@ td small {
   width: 17px;
 }
 .integrity-good {
-  color: #2f7a5c;
+  color: #466aa2;
 }
 .integrity-bad {
   color: var(--danger);

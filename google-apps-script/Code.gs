@@ -27,8 +27,8 @@ var PUBLIC_CACHE_SECONDS = 900;
 function doGet() {
   return HtmlService.createHtmlOutput(
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<style>body{font-family:Arial,sans-serif;background:#f5f7f2;color:#18322d;display:grid;place-items:center;min-height:90vh;margin:0}' +
-    '.card{text-align:center;background:#fff;border:1px solid #dfe7e1;border-radius:18px;padding:32px;max-width:480px}img{width:220px;max-width:80%}p{color:#6d7f79}</style>' +
+    '<style>body{font-family:Arial,sans-serif;background:#f5f8fc;color:#16223c;display:grid;place-items:center;min-height:90vh;margin:0}' +
+    '.card{text-align:center;background:#fff;border:1px solid #dae2ec;border-radius:18px;padding:32px;max-width:480px}img{width:220px;max-width:80%}p{color:#66748a}</style>' +
     '<div class="card"><img src="https://ik.imagekit.io/k2qmtccm6/CHED_Logo_New.png" alt="CHED">' +
     '<h1>CSM Portal API</h1><p>This service is online. Use the deployed portal to access the application.</p></div>'
   ).setTitle('CHED-OSDS CSM API')
@@ -61,7 +61,7 @@ function doPost(e) {
     else if (action === 'adminGetResponses') data = adminGetResponses(body.filters || {}, body.adminToken);
     else if (action === 'adminGetCoaRequests') data = adminGetCoaRequests(body.filters || {}, body.adminToken);
     else if (action === 'adminSaveCoaDetails') data = adminSaveCoaDetails(body.payload || {}, body.adminToken);
-    else if (action === 'adminGenerateCoa') data = adminGenerateCoa(body.responseId, body.adminToken);
+    else if (action === 'adminGenerateCoa') data = adminGenerateCoa(body.responseId, body.issueKey, body.adminToken);
     else if (action === 'adminGetServices') data = adminGetServices(body.adminToken);
     else if (action === 'adminSaveService') data = adminSaveService(body.payload || {}, body.adminToken);
     else if (action === 'adminGetServiceStats') data = adminGetServiceStats(body.period || {}, body.adminToken);
@@ -177,6 +177,12 @@ function assertSubmitSharedToken_(token) {
     throw new Error('Forbidden: invalid submit token.');
 }
 
+/**
+ * Fed only by PORTAL_BASE_URL as configured in Vercel. The proxy used to fall
+ * back to the request's Host header, which made this a persistent store for
+ * an attacker-supplied domain; it now sends nothing when the variable is
+ * unset, so an absent value leaves the stored one untouched.
+ */
 function rememberPortalBaseUrl_(url) {
   url = safeTrim_(url).replace(/\/$/, '');
   if (!/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(url)) return;
@@ -190,6 +196,38 @@ function portalBaseUrl_() {
 
 function invalidatePublicCache_() {
   CacheService.getScriptCache().removeAll(['PUBLIC_CSM_CONFIG']);
+}
+
+/**
+ * Publishes a file to anyone holding its link, and describes the failure
+ * instead of hiding it: a Workspace policy that forbids link sharing would
+ * otherwise leave a client with a certificate URL they cannot open and an
+ * office register that calls it issued.
+ */
+function shareFileByLink_(file) {
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return '';
+  } catch (error) {
+    return 'Link sharing was refused for this file (' +
+      String(error && error.message || error).slice(0, 160) +
+      '). Share it from Drive, or ask your Workspace administrator to allow link sharing.';
+  }
+}
+
+/** Portal administrators, for granting access to files that hold client data. */
+function activeAdminEmails_() {
+  var sh = ensureWhitelistSheet_();
+  if (sh.getLastRow() < 2) return [];
+  var hdr = getHeaderMap_(sh);
+  var cEmail = idxOf_(hdr, ['email','e-mail']), cActive = idxOf_(hdr, ['active','enabled']);
+  if (cEmail < 0) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues()
+    .filter(function (row) {
+      return safeTrim_(row[cEmail]) &&
+        (cActive < 0 || String(row[cActive]).toLowerCase() !== 'false');
+    })
+    .map(function (row) { return safeTrim_(row[cEmail]).toLowerCase(); });
 }
 
 /** Creates the folder on first use and remembers its id in Settings. */
@@ -213,6 +251,16 @@ function setupColumn_(header, aliases) {
   return { header: header, aliases: [header].concat(aliases || []) };
 }
 
+/** Idempotent: re-running setup does not stack duplicate triggers. */
+function ensureDailyTrigger_(handlerName, atHour) {
+  var existing = ScriptApp.getProjectTriggers().filter(function (trigger) {
+    return trigger.getHandlerFunction() === handlerName;
+  });
+  if (existing.length) return false;
+  ScriptApp.newTrigger(handlerName).timeBased().everyDays(1).atHour(atHour || 3).create();
+  return true;
+}
+
 function ensureSetupSheet_(ss, sheetName, columns) {
   var sh = ss.getSheetByName(sheetName), created = false, added = [];
   if (!sh) { sh = ss.insertSheet(sheetName); created = true; }
@@ -227,7 +275,7 @@ function ensureSetupSheet_(ss, sheetName, columns) {
   });
   sh.setFrozenRows(1);
   if (sh.getLastColumn() > 0)
-    sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold').setBackground('#0b4b3c').setFontColor('#ffffff');
+    sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold').setBackground('#0032a0').setFontColor('#ffffff');
   return { sheet: sh, created: created, headersAdded: added };
 }
 
@@ -235,6 +283,7 @@ function responseColumns_() {
   var columns = [
     setupColumn_('Timestamp', ['submitted at']),
     setupColumn_('ResponseID', ['response id','reference']),
+    setupColumn_('SubmissionID', ['submission id']),
     setupColumn_('TransactionDate', ['transaction date','date']),
     setupColumn_('Month'), setupColumn_('Year'),
     setupColumn_('ClientType', ['client type']),
@@ -261,6 +310,7 @@ function responseColumns_() {
     setupColumn_('COAStatus', ['coa status']),
     setupColumn_('COALink', ['coa link']),
     setupColumn_('COAIssuedAt', ['coa issued at']),
+    setupColumn_('COAIssueKey', ['coa issue key']),
     setupColumn_('VerificationCode', ['verification code']),
     setupColumn_('VerificationURL', ['verification url'])
   ]);
@@ -309,10 +359,21 @@ function setupCsmSheets() {
 
     seedServices_(services.sheet);
     seedSettings_();
+    // Setting up the sheets is the important part; a trigger that cannot be
+    // installed is worth reporting, not worth failing the whole setup over.
+    var triggerStatus;
+    try {
+      triggerStatus = ensureDailyTrigger_('pruneAdminSessions', 3) ? 'installed' : 'already present';
+    } catch (triggerError) {
+      triggerStatus = 'could not be installed (' +
+        String(triggerError && triggerError.message || triggerError).slice(0, 120) +
+        ') — add a daily trigger for pruneAdminSessions by hand.';
+    }
 
     return {
       status: 'OK',
       spreadsheetUrl: ss.getUrl(),
+      sessionPruneTrigger: triggerStatus,
       sheets: [responses, services, stats, settings, reports, whitelist, users, audit].map(function (result) {
         return { name: result.sheet.getName(), created: result.created, headersAdded: result.headersAdded };
       }),
@@ -543,6 +604,33 @@ function makeVerificationCode_() {
   return 'OSDS-' + Utilities.getUuid().replace(/-/g,'').slice(0, 20).toUpperCase();
 }
 
+/**
+ * The browser retries a submission whose response never arrived, and a slow
+ * write here looks exactly like a failed one. Each form carries an id that
+ * survives those retries, so the second arrival is answered with the first
+ * reference instead of appending another row and inflating the CSM counts.
+ *
+ * Scans newest first: a duplicate is always recent. Returns null when the
+ * SubmissionID column is absent, which keeps this safe on a sheet created
+ * before the column existed.
+ */
+function findSubmissionById_(sheet, headerMap, submissionId) {
+  var col = idxOf_(headerMap, ['submissionid','submission id']);
+  if (col < 0 || !submissionId || sheet.getLastRow() < 2) return null;
+  var values = sheet.getRange(2, col + 1, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = values.length - 1; i >= 0; i--) {
+    if (safeTrim_(values[i][0]) !== submissionId) continue;
+    var row = sheet.getRange(i + 2, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var refCol = idxOf_(headerMap, ['responseid','response id','reference']);
+    var coaCol = idxOf_(headerMap, ['coarequested','coa requested']);
+    return {
+      referenceId: refCol >= 0 ? safeTrim_(row[refCol]) : '',
+      coaRequested: coaCol >= 0 && safeTrim_(row[coaCol]).toUpperCase() === 'YES'
+    };
+  }
+  return null;
+}
+
 function submitResponse(formData) {
   formData = formData || {};
   // Bots fill every field they find; a real client never sees this one.
@@ -597,6 +685,17 @@ function submitResponse(formData) {
     var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES);
     if (!sh) throw new Error("Sheet 'Responses' not found. Run setupCsmSheets().");
     var hdr = getHeaderMap_(sh), lastCol = sh.getLastColumn(), row = new Array(lastCol).fill('');
+
+    var submissionId = safeTrim_(formData.submissionId).slice(0, 64);
+    var alreadyStored = findSubmissionById_(sh, hdr, submissionId);
+    if (alreadyStored)
+      return {
+        status: 'OK',
+        referenceId: alreadyStored.referenceId,
+        coaRequested: alreadyStored.coaRequested,
+        duplicate: true
+      };
+
     var referenceId = 'CSM-' + Utilities.getUuid().replace(/-/g,'').slice(0, 10).toUpperCase();
 
     function put(names, value) {
@@ -605,6 +704,7 @@ function submitResponse(formData) {
     }
     put(['timestamp'], new Date());
     put(['responseid'], referenceId);
+    put(['submissionid'], submissionId);
     put(['transactiondate'], Utilities.formatDate(transactionDate, timezone_(), 'yyyy-MM-dd'));
     put(['month'], Utilities.formatDate(transactionDate, timezone_(), 'MMMM').toUpperCase());
     put(['year'], transactionDate.getFullYear());
@@ -641,52 +741,134 @@ function submitResponse(formData) {
 
 // ------------------------------ Response reads ---------------------------------
 
+/**
+ * Record field -> the header names that may hold it, matching the aliases
+ * declared in responseColumns_ so a sheet that predates a rename still reads.
+ */
+var RESPONSE_FIELDS_ = {
+  referenceId: ['responseid','response id','reference'],
+  timestamp: ['timestamp','submitted at'],
+  transactionDate: ['transactiondate','transaction date','date'],
+  month: ['month'],
+  year: ['year'],
+  clientType: ['clienttype','client type'],
+  sex: ['sex'],
+  age: ['age'],
+  region: ['region'],
+  regionCode: ['regioncode','region code'],
+  serviceId: ['serviceid','service id'],
+  serviceCode: ['servicecode','service code'],
+  serviceName: ['servicename','service name'],
+  otherService: ['otherservice','other service'],
+  suggestions: ['suggestions','comments','comments/suggestions'],
+  email: ['email','e-mail'],
+  coaRequested: ['coarequested','coa requested'],
+  coaTitle: ['coatitle','coa title'],
+  coaName: ['coaname','coa name'],
+  coaAgency: ['coaagency','coa agency'],
+  coaPurpose: ['coapurpose','coa purpose'],
+  coaDateFrom: ['coadatefrom','coa date from'],
+  coaDateTo: ['coadateto','coa date to'],
+  coaStatus: ['coastatus','coa status'],
+  coaLink: ['coalink','coa link'],
+  coaIssuedAt: ['coaissuedat','coa issued at'],
+  coaIssueKey: ['coaissuekey','coa issue key'],
+  verificationCode: ['verificationcode','verification code'],
+  verificationUrl: ['verificationurl','verification url']
+};
+
+/**
+ * Resolves every column once per read. The row loop used to look each field up
+ * by name again for every row — some forty header searches per row, each
+ * lowercasing strings — which is what made a few thousand responses expensive
+ * to page through rather than the single getValues call.
+ */
+function responseFieldColumns_(headerMap) {
+  var columns = {};
+  Object.keys(RESPONSE_FIELDS_).forEach(function (field) {
+    columns[field] = idxOf_(headerMap, RESPONSE_FIELDS_[field]);
+  });
+  CC_KEYS.concat(SQD_KEYS).forEach(function (key) {
+    columns[key] = idxOf_(headerMap, [key]);
+  });
+  return columns;
+}
+
+function cellText_(value, columnIndex) {
+  return columnIndex >= 0 ? safeTrim_(value[columnIndex]) : '';
+}
+
+function buildResponseRecord_(value, col, rowIndex) {
+  var record = {
+    rowIndex: rowIndex,
+    referenceId: cellText_(value, col.referenceId),
+    timestamp: col.timestamp >= 0 ? value[col.timestamp] : '',
+    transactionDate: col.transactionDate >= 0 ? fmtDate_(value[col.transactionDate]) : '',
+    month: cellText_(value, col.month).toUpperCase(),
+    year: col.year >= 0 ? Number(value[col.year]) || 0 : 0,
+    clientType: cellText_(value, col.clientType).toUpperCase(),
+    sex: cellText_(value, col.sex).toUpperCase(),
+    age: cellText_(value, col.age),
+    region: cellText_(value, col.region),
+    regionCode: cellText_(value, col.regionCode) || 'N/A',
+    serviceId: cellText_(value, col.serviceId),
+    serviceCode: cellText_(value, col.serviceCode),
+    serviceName: cellText_(value, col.serviceName),
+    otherService: cellText_(value, col.otherService),
+    suggestions: cellText_(value, col.suggestions),
+    email: cellText_(value, col.email),
+    coaRequested: cellText_(value, col.coaRequested).toUpperCase() === 'YES',
+    coaTitle: cellText_(value, col.coaTitle),
+    coaName: cellText_(value, col.coaName),
+    coaAgency: cellText_(value, col.coaAgency),
+    coaPurpose: cellText_(value, col.coaPurpose),
+    coaDateFrom: col.coaDateFrom >= 0 ? fmtDate_(value[col.coaDateFrom]) : '',
+    coaDateTo: col.coaDateTo >= 0 ? fmtDate_(value[col.coaDateTo]) : '',
+    coaStatus: cellText_(value, col.coaStatus).toUpperCase() || 'NONE',
+    coaLink: cellText_(value, col.coaLink),
+    coaIssuedAt: cellText_(value, col.coaIssuedAt),
+    coaIssueKey: cellText_(value, col.coaIssueKey),
+    verificationCode: cellText_(value, col.verificationCode),
+    verificationUrl: cellText_(value, col.verificationUrl)
+  };
+  var answerKeys = CC_KEYS.concat(SQD_KEYS);
+  for (var i = 0; i < answerKeys.length; i++)
+    record[answerKeys[i]] = cellText_(value, col[answerKeys[i]]);
+  record.overall = meanOf_(SQD_KEYS.map(function (key) { return record[key]; }));
+  return record;
+}
+
 function readResponses_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES);
   if (!sh || sh.getLastRow() < 2) return { rows: [], sheet: sh, header: sh ? getHeaderMap_(sh) : {} };
-  var hdr = getHeaderMap_(sh);
+  var hdr = getHeaderMap_(sh), col = responseFieldColumns_(hdr);
   var values = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
-  var rows = values.map(function (value, index) {
-    function cell(name) {
-      var col = idxOf_(hdr, [name]);
-      return col >= 0 ? value[col] : '';
-    }
-    var record = {
-      rowIndex: index + 2,
-      referenceId: safeTrim_(cell('responseid')),
-      timestamp: cell('timestamp'),
-      transactionDate: fmtDate_(cell('transactiondate')),
-      month: safeTrim_(cell('month')).toUpperCase(),
-      year: Number(cell('year')) || 0,
-      clientType: safeTrim_(cell('clienttype')).toUpperCase(),
-      sex: safeTrim_(cell('sex')).toUpperCase(),
-      age: safeTrim_(cell('age')),
-      region: safeTrim_(cell('region')),
-      regionCode: safeTrim_(cell('regioncode')) || 'N/A',
-      serviceId: safeTrim_(cell('serviceid')),
-      serviceCode: safeTrim_(cell('servicecode')),
-      serviceName: safeTrim_(cell('servicename')),
-      otherService: safeTrim_(cell('otherservice')),
-      suggestions: safeTrim_(cell('suggestions')),
-      email: safeTrim_(cell('email')),
-      coaRequested: safeTrim_(cell('coarequested')).toUpperCase() === 'YES',
-      coaTitle: safeTrim_(cell('coatitle')),
-      coaName: safeTrim_(cell('coaname')),
-      coaAgency: safeTrim_(cell('coaagency')),
-      coaPurpose: safeTrim_(cell('coapurpose')),
-      coaDateFrom: fmtDate_(cell('coadatefrom')),
-      coaDateTo: fmtDate_(cell('coadateto')),
-      coaStatus: safeTrim_(cell('coastatus')).toUpperCase() || 'NONE',
-      coaLink: safeTrim_(cell('coalink')),
-      coaIssuedAt: safeTrim_(cell('coaissuedat')),
-      verificationCode: safeTrim_(cell('verificationcode')),
-      verificationUrl: safeTrim_(cell('verificationurl'))
-    };
-    CC_KEYS.concat(SQD_KEYS).forEach(function (key) { record[key] = safeTrim_(cell(key)); });
-    record.overall = meanOf_(SQD_KEYS.map(function (key) { return record[key]; }));
-    return record;
-  }).filter(function (record) { return record.referenceId; });
+  var rows = [];
+  for (var i = 0; i < values.length; i++) {
+    // Skip blank rows before building anything for them.
+    if (!cellText_(values[i], col.referenceId)) continue;
+    rows.push(buildResponseRecord_(values[i], col, i + 2));
+  }
   return { rows: rows, sheet: sh, header: hdr };
+}
+
+/**
+ * Finds one response by an exact match in a single column: reads that column
+ * alone, then only the row that matched. readResponses_ parses every column of
+ * every row, which is the wrong shape for a point lookup — and one of these
+ * lookups sits behind the public, unauthenticated verification endpoint.
+ */
+function findResponseByColumn_(sheet, col, columnIndex, wanted) {
+  wanted = safeTrim_(wanted).toUpperCase();
+  if (columnIndex < 0 || !wanted || sheet.getLastRow() < 2) return null;
+  var values = sheet.getRange(2, columnIndex + 1, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = values.length - 1; i >= 0; i--) {
+    if (safeTrim_(values[i][0]).toUpperCase() !== wanted) continue;
+    var rowIndex = i + 2;
+    return buildResponseRecord_(
+      sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0], col, rowIndex);
+  }
+  return null;
 }
 
 /** N/A and blanks are excluded from every CSM average, per the ARTA guidance. */
@@ -705,6 +887,24 @@ function medianOf_(values) {
   return scores.length % 2 ? scores[middle] : (scores[middle - 1] + scores[middle]) / 2;
 }
 function round2_(value) { return Math.round((Number(value) || 0) * 100) / 100; }
+
+/**
+ * The one definition of an overall score: the mean of every valid SQD answer
+ * across `records`, respondent-weighted, N/A excluded.
+ *
+ * The dashboard and the CSM Summary Report both call this. They used to
+ * compute it two different ways — the dashboard over all answers, the report
+ * as an unweighted average of per-service averages — so a program with two
+ * respondents swung the filed figure as hard as one with two hundred, and the
+ * two screens disagreed about the same quarter.
+ */
+function overallScore_(records) {
+  var values = [];
+  records.forEach(function (record) {
+    SQD_KEYS.forEach(function (key) { values.push(record[key]); });
+  });
+  return round2_(meanOf_(values));
+}
 
 // ------------------------------ Period helpers ---------------------------------
 
@@ -774,10 +974,9 @@ function adminGetOverview(periodInput, adminToken) {
     tally_(sexes, record.sex);
     tally_(ageBrackets, ageBracketOf_(record.age));
     var bucket = byService[record.serviceCode] || (byService[record.serviceCode] = {
-      code: record.serviceCode, name: record.serviceName, respondents: 0, scores: []
+      code: record.serviceCode, name: record.serviceName, records: []
     });
-    bucket.respondents++;
-    SQD_KEYS.forEach(function (key) { bucket.scores.push(record[key]); });
+    bucket.records.push(record);
   });
 
   var aware = records.filter(function (record) {
@@ -794,25 +993,55 @@ function adminGetOverview(periodInput, adminToken) {
   return {
     period: period,
     totalResponses: records.length,
-    overall: round2_(meanOf_([].concat.apply([], records.map(function (record) {
-      return SQD_KEYS.map(function (key) { return record[key]; });
-    })))),
+    overall: overallScore_(records),
     ccAwareness: records.length ? Math.round((aware / records.length) * 1000) / 10 : 0,
     sqd: sqd, cc: cc,
     clientTypes: clientTypes, sexes: sexes, ageBrackets: ageBrackets,
     services: Object.keys(byService).map(function (code) {
       var bucket = byService[code];
-      return { code: code, name: bucket.name, respondents: bucket.respondents, overall: round2_(meanOf_(bucket.scores)) };
+      return {
+        code: code, name: bucket.name,
+        respondents: bucket.records.length,
+        overall: overallScore_(bucket.records)
+      };
     }).sort(function (a, b) { return b.respondents - a.respondents; }),
     coa: { issued: coaIssued, pending: coaPending, failed: coaFailed }
   };
 }
 
+/**
+ * Filters and pages over the whole sheet rather than handing the browser the
+ * newest 500 rows to sift locally. That older shape quietly capped what an
+ * administrator could see or search — the screen said "All responses" while
+ * anything past the cap was simply absent — which is the wrong failure for the
+ * record a compliance report is drawn from.
+ *
+ * Returns a page plus the true match count, so the UI can say what it is
+ * showing and what it is not.
+ */
 function adminGetResponses(filters, adminToken) {
   requireAdmin_(adminToken);
-  var limit = Math.min(2000, Math.max(25, Number(filters.limit) || 500));
-  var rows = readResponses_().rows;
-  return rows.slice(-limit).reverse().map(function (record) {
+  filters = filters || {};
+  var query = safeTrim_(filters.query).toLowerCase();
+  var serviceCode = safeTrim_(filters.serviceCode).toUpperCase();
+  var coaStatus = safeTrim_(filters.coaStatus).toUpperCase();
+  var period = filters.period && safeTrim_(filters.period.year)
+    ? normalizePeriod_(filters.period) : null;
+  var limit = Math.min(500, Math.max(25, Number(filters.limit) || 100));
+  var offset = Math.max(0, Number(filters.offset) || 0);
+
+  var matched = readResponses_().rows.filter(function (record) {
+    if (period && !inPeriod_(record, period)) return false;
+    if (serviceCode && record.serviceCode.toUpperCase() !== serviceCode) return false;
+    if (coaStatus && (record.coaStatus || 'NONE').toUpperCase() !== coaStatus) return false;
+    if (!query) return true;
+    return [record.referenceId, record.email, record.serviceName, record.otherService,
+      record.region, record.clientType, record.suggestions]
+      .join(' ').toLowerCase().indexOf(query) >= 0;
+  });
+
+  // Newest first, then page.
+  var page = matched.reverse().slice(offset, offset + limit).map(function (record) {
     var out = {
       referenceId: record.referenceId, transactionDate: record.transactionDate,
       clientType: record.clientType, sex: record.sex, age: record.age,
@@ -823,6 +1052,8 @@ function adminGetResponses(filters, adminToken) {
     CC_KEYS.concat(SQD_KEYS).forEach(function (key) { out[key] = record[key]; });
     return out;
   });
+
+  return { rows: page, total: matched.length, offset: offset, limit: limit };
 }
 
 // --------------------------- Service statistics --------------------------------
@@ -1043,6 +1274,9 @@ function adminLogin(email, password) {
     throw new Error('Invalid email or password.');
   cache.remove(throttleKey);
 
+  // Logins are rare, so this is the natural place to drain a few dead sessions.
+  try { pruneAdminSessions_(25); } catch (_) {}
+
   var token = Utilities.getUuid().replace(/-/g,'') + Utilities.getUuid().replace(/-/g,'');
   var session = {
     email: email, name: safeTrim_(match[cName]) || email,
@@ -1050,7 +1284,14 @@ function adminLogin(email, password) {
   };
   var key = adminSessionKey_(token), json = JSON.stringify(session);
   CacheService.getScriptCache().put(key, json, 21600);
-  PropertiesService.getScriptProperties().setProperty(key, json);
+  var props = PropertiesService.getScriptProperties();
+  try {
+    props.setProperty(key, json);
+  } catch (quotaError) {
+    // Already full: sweep hard rather than refuse the sign-in.
+    pruneAdminSessions_(5000);
+    props.setProperty(key, json);
+  }
   return { token: token, user: { email: session.email, name: session.name, role: session.role }, expiresAt: session.expiresAt };
 }
 
@@ -1116,10 +1357,44 @@ function requireSuperadmin_(adminToken) {
   return session;
 }
 
+var SESSION_PROPERTY_PREFIX_ = 'ADMIN_SESSION_';
+
 function adminSessionKey_(token) {
   var secret = PropertiesService.getScriptProperties().getProperty('SESSION_HASH_SECRET');
   if (!secret) throw new Error('Session security is not configured. Run setupCsmSecurity().');
-  return 'ADMIN_SESSION_' + hmac256Base64_(String(token || ''), secret);
+  return SESSION_PROPERTY_PREFIX_ + hmac256Base64_(String(token || ''), secret);
+}
+
+/**
+ * Sessions are kept in Script Properties because CacheService may evict an
+ * entry before the six hours are up. Nothing removed them, though: an expired
+ * session is only cleared when its own token is presented again, so an
+ * administrator who closes the browser leaves a property behind for good.
+ *
+ * Script Properties is capped at 500KB in total, and setProperty throws once
+ * that is reached — which would take out adminLogin itself and lock every
+ * administrator out of the module permanently. Drained a little on each login
+ * and in bulk by a daily trigger.
+ */
+function pruneAdminSessions_(budget) {
+  var props = PropertiesService.getScriptProperties();
+  var stored, removed = 0, now = Date.now();
+  try { stored = props.getProperties(); } catch (_) { return 0; }
+  var keys = Object.keys(stored);
+  for (var i = 0; i < keys.length && removed < (budget || 25); i++) {
+    if (keys[i].indexOf(SESSION_PROPERTY_PREFIX_) !== 0) continue;
+    var expiresAt = 0;
+    // An entry that will not parse can never authenticate anyone; drop it too.
+    try { expiresAt = Number(JSON.parse(stored[keys[i]]).expiresAt) || 0; } catch (_) {}
+    if (expiresAt > now) continue;
+    try { props.deleteProperty(keys[i]); removed++; } catch (_) {}
+  }
+  return removed;
+}
+
+/** Installed as a daily trigger by setupCsmSheets(); safe to run by hand. */
+function pruneAdminSessions() {
+  return { status: 'OK', removed: pruneAdminSessions_(5000) };
 }
 
 function adminLoginThrottleKey_(email) {
@@ -1214,11 +1489,35 @@ function auditCanonical_(entry) {
     .map(safeTrim_).join('|');
 }
 
+/**
+ * A log documented as tamper-evident must never lose an entry quietly. When
+ * the append cannot happen the count is recorded and reported alongside the
+ * chain check, so a gap is visible instead of invisible.
+ */
+function recordAuditDrop_(action, reason) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('AUDIT_DROPPED_COUNT',
+      String((Number(props.getProperty('AUDIT_DROPPED_COUNT')) || 0) + 1));
+    props.setProperty('AUDIT_DROPPED_LAST', Utilities.formatDate(new Date(), timezone_(), 'yyyy-MM-dd HH:mm:ss') +
+      ' ' + safeTrim_(action) + ' (' + safeTrim_(reason) + ')');
+  } catch (_) {}
+  console.error('Audit write skipped for ' + action + ': ' + reason);
+}
+
 function appendAuditForRequest_(action, body, success, errorMessage, actor, requestContext) {
   var secret = PropertiesService.getScriptProperties().getProperty('AUDIT_HASH_SECRET');
   if (!secret) return;
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return;
+  // The document lock, not the script lock: appending one row is short, while
+  // the script lock also carries certificate issuance and report building.
+  // Waiting on those for 5s and then returning meant every privileged action
+  // taken during a 60s report build went unrecorded, with the chain still
+  // validating over what did get written.
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(20000)) {
+    recordAuditDrop_(action, 'could not acquire the audit lock');
+    return;
+  }
   try {
     var sh = ensureAuditSheet_(), hdr = getHeaderMap_(sh), target = auditTargetForRequest_(action, body);
     var lastRow = sh.getLastRow(), cHash = idxOf_(hdr, ['entry_hash']);
@@ -1240,6 +1539,9 @@ function appendAuditForRequest_(action, body, success, errorMessage, actor, requ
     Object.keys(entry).forEach(function (key) { if (key in hdr) row[hdr[key]] = safeSheetValue_(entry[key]); });
     sh.appendRow(row);
     PropertiesService.getScriptProperties().setProperty('AUDIT_HEAD_HASH', entry.entry_hash);
+  } catch (writeError) {
+    recordAuditDrop_(action, String(writeError && writeError.message || writeError).slice(0, 120));
+    throw writeError;
   } finally { lock.releaseLock(); }
 }
 
@@ -1247,11 +1549,20 @@ function adminGetAuditLog(filters, adminToken) {
   requireSuperadmin_(adminToken);
   filters = filters || {};
   var sh = ensureAuditSheet_();
-  var expectedHead = PropertiesService.getScriptProperties().getProperty('AUDIT_HEAD_HASH') || '';
-  if (sh.getLastRow() < 2) return { entries: [], total: 0, integrity: { valid: !expectedHead, checkedRows: 0 } };
+  var props = PropertiesService.getScriptProperties();
+  var expectedHead = props.getProperty('AUDIT_HEAD_HASH') || '';
+  // An entry that could not be written is as much a gap as one that was
+  // deleted, so it is reported next to the chain result rather than buried.
+  var dropped = Number(props.getProperty('AUDIT_DROPPED_COUNT')) || 0;
+  var droppedLast = safeTrim_(props.getProperty('AUDIT_DROPPED_LAST'));
+  if (sh.getLastRow() < 2)
+    return {
+      entries: [], total: 0,
+      integrity: { valid: !expectedHead && !dropped, checkedRows: 0, dropped: dropped, droppedLast: droppedLast }
+    };
   var hdr = getHeaderMap_(sh);
   var rows = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getDisplayValues();
-  var secret = PropertiesService.getScriptProperties().getProperty('AUDIT_HASH_SECRET') || '';
+  var secret = props.getProperty('AUDIT_HASH_SECRET') || '';
   var integrity = true, previousShown = null;
   var entries = rows.map(function (row) {
     function cell(name) { return name in hdr ? safeTrim_(row[hdr[name]]) : ''; }
@@ -1282,7 +1593,12 @@ function adminGetAuditLog(filters, adminToken) {
       try { entry.details = JSON.parse(entry.details || '{}'); } catch (_) { entry.details = {}; }
       return entry;
     }),
-    integrity: { valid: integrity, checkedRows: entries.length },
+    integrity: {
+      valid: integrity && !dropped,
+      checkedRows: entries.length,
+      dropped: dropped,
+      droppedLast: droppedLast
+    },
     total: filtered.length
   };
 }

@@ -1,15 +1,10 @@
 import React from "react";
 import { CalendarRange, ChevronDown } from "lucide-react";
-import { QUARTERS } from "../lib/csm";
+import { QUARTERS, portalPeriodNow } from "../lib/csm";
 
-export const currentPeriod = () => {
-  const now = new Date();
-  return {
-    type: "quarter",
-    year: now.getFullYear(),
-    quarter: String(Math.floor(now.getMonth() / 3) + 1),
-  };
-};
+// The reporting period follows the office's calendar, not the browser's, so an
+// administrator abroad still lands on the quarter the backend is filing.
+export const currentPeriod = () => ({ type: "quarter", ...portalPeriodNow() });
 
 export const describePeriod = (period) =>
   period.type === "year"
@@ -17,7 +12,7 @@ export const describePeriod = (period) =>
     : `${["", "1st", "2nd", "3rd", "4th"][Number(period.quarter)]} Quarter ${period.year}`;
 
 export function PeriodPicker({ period, onChange }) {
-  const thisYear = new Date().getFullYear();
+  const thisYear = portalPeriodNow().year;
   const years = Array.from({ length: 6 }, (_, index) => thisYear - index);
   return (
     <div className="period-picker">

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,25 +20,52 @@ import {
   SEXES,
   SQD_QUESTIONS,
   SQD_SCALE,
+  portalToday,
   t,
 } from "../lib/csm";
 import { getPortalConfig, submitResponse } from "../lib/api";
 import { Bilingual, Brand, LanguageToggle, TurnstileWidget } from "./shared";
 import { navigate } from "../router";
 
-const today = () => new Date().toISOString().slice(0, 10);
+/**
+ * A change detector, not a security control. Two attempts carrying the same
+ * answers must produce the same id so a retry is recognised as the duplicate
+ * it is — while an answer corrected after a failed attempt must produce a
+ * different one, so the correction is stored rather than silently dropped in
+ * favour of the version that landed first.
+ */
+const fingerprint = (value) => {
+  const text = JSON.stringify(value);
+  let hash = 5381;
+  for (let index = 0; index < text.length; index++)
+    hash = ((hash * 33) ^ text.charCodeAt(index)) >>> 0;
+  return hash.toString(36);
+};
 
-const emptyForm = {
+const newSubmissionId = () =>
+  globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+
+/**
+ * A fresh form carries a fresh submission id, sent with the response and held
+ * steady across every retry of that response. A submission that reached the
+ * sheet before the network gave up is then recognised rather than written
+ * twice — the client retries on timeouts, and Apps Script is slow enough under
+ * load for that to happen.
+ */
+const createEmptyForm = () => ({
+  submissionId: newSubmissionId(),
   wantsCoa: "",
   coaTitle: "Mr.",
   coaName: "",
   coaAgency: "",
   coaPurpose: "",
-  coaDateFrom: today(),
+  coaDateFrom: portalToday(),
   coaDateTo: "",
   email: "",
   clientType: "",
-  transactionDate: today(),
+  transactionDate: portalToday(),
   sex: "",
   age: "",
   region: "",
@@ -46,7 +73,7 @@ const emptyForm = {
   otherService: "",
   suggestions: "",
   website: "",
-};
+});
 
 const STEPS = [
   { en: "Certificate of Appearance", tl: "Certificate of Appearance" },
@@ -111,7 +138,7 @@ function SqdRating({ question, index, value, onChange, language }) {
 export function SurveyForm() {
   const [language, setLanguage] = useState("en"),
     [step, setStep] = useState(0),
-    [form, setForm] = useState(emptyForm),
+    [form, setForm] = useState(createEmptyForm),
     [services, setServices] = useState([]),
     [cc, setCc] = useState({}),
     [sqd, setSqd] = useState({}),
@@ -173,6 +200,15 @@ export function SurveyForm() {
     return true;
   }, [step, form, cc, sqd, wantsCoa, isOtherService]);
 
+  // Two clicks landing in the same tick share one render's closure, so both
+  // would advance. Comparing against the step the click was made on makes the
+  // second a no-op, instead of skipping a step and the validation with it.
+  const advance = (delta) => setStep((s) => (s === step ? s + delta : s));
+
+  // The submit path needs a ref rather than `busy` for the same reason: both
+  // clicks read the pre-render value of the state flag.
+  const submitting = useRef(false);
+
   async function next() {
     setError("");
     if (!valid)
@@ -182,7 +218,7 @@ export function SurveyForm() {
           : "Please complete every required answer before continuing.",
       );
     if (step < STEPS.length - 1) {
-      setStep((s) => s + 1);
+      advance(1);
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
@@ -192,24 +228,27 @@ export function SurveyForm() {
           ? "Kumpletuhin ang security verification bago magsumite."
           : "Please complete the security verification before submitting.",
       );
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     try {
+      // The id sent to the backend combines the form's id with a fingerprint
+      // of the answers, so a plain retry dedupes while an edited resubmission
+      // is stored as the correction it is.
+      const { submissionId, ...answers } = {
+        ...form,
+        language,
+        serviceCode: selectedService?.code || "",
+        serviceName: selectedService?.name_en || "",
+        ...Object.fromEntries(
+          CC_QUESTIONS.map((question) => [question.id, cc[question.id] || ""]),
+        ),
+        ...Object.fromEntries(
+          SQD_QUESTIONS.map((question) => [question.id, sqd[question.id] || ""]),
+        ),
+      };
       const result = await submitResponse(
-        {
-          ...form,
-          language,
-          serviceCode: selectedService?.code || "",
-          serviceName: selectedService?.name_en || "",
-          ...Object.fromEntries(
-            CC_QUESTIONS.map((question) => [question.id, cc[question.id] || ""]),
-          ),
-          ...Object.fromEntries(
-            SQD_QUESTIONS.map((question) => [
-              question.id,
-              sqd[question.id] || "",
-            ]),
-          ),
-        },
+        { ...answers, submissionId: `${submissionId}-${fingerprint(answers)}` },
         turnstileToken,
       );
       if (result.status === "BAD_REQUEST")
@@ -221,6 +260,7 @@ export function SurveyForm() {
       setTurnstileToken("");
       setTurnstileReset((value) => value + 1);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -278,7 +318,7 @@ export function SurveyForm() {
               onClick={() => {
                 setDone(null);
                 setStep(0);
-                setForm(emptyForm);
+                setForm(createEmptyForm());
                 setCc({});
                 setSqd({});
                 setTurnstileToken("");
@@ -780,7 +820,7 @@ export function SurveyForm() {
             <button
               className="button ghost"
               disabled={step === 0}
-              onClick={() => setStep((s) => s - 1)}
+              onClick={() => advance(-1)}
               title="Return to the previous step"
             >
               <ArrowLeft size={18} /> {language === "tl" ? "Bumalik" : "Back"}

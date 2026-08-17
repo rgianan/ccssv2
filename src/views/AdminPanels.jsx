@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Check,
   ClipboardList,
@@ -96,15 +96,25 @@ export function CertificatePanel({ onError }) {
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
 
+  // Tracks the filter a response belongs to, so switching tabs quickly cannot
+  // leave the slower request's rows sitting under the newer tab.
+  const wanted = useRef(status);
   const load = (nextStatus = status) => {
+    wanted.current = nextStatus;
     setLoading(true);
     return getCoaRequests({ status: nextStatus })
-      .then(setRows)
-      .catch(onError)
-      .finally(() => setLoading(false));
+      .then((result) => {
+        if (wanted.current === nextStatus) setRows(result);
+      })
+      .catch((thrown) => {
+        if (wanted.current === nextStatus) onError(thrown);
+      })
+      .finally(() => {
+        if (wanted.current === nextStatus) setLoading(false);
+      });
   };
   useEffect(() => {
-    load();
+    load(status);
   }, [status]);
 
   async function issue(row) {
@@ -813,7 +823,10 @@ const SETTING_FIELDS = [
   ["report_approved_title", "Approved by — position", "Director IV, OSDS"],
 ];
 
-export function SettingsPanel({ onError }) {
+/** Whose name signs a certificate, and the files it is built from. */
+const SIGNING_FIELDS = ["coa_signatory", "coa_designation"];
+
+export function SettingsPanel({ onError, canSign = false }) {
   const [settings, setSettings] = useState({}),
     [loading, setLoading] = useState(true),
     [saving, setSaving] = useState(false),
@@ -887,18 +900,23 @@ export function SettingsPanel({ onError }) {
           </button>
         </div>
         <div className="settings-grid">
-          {SETTING_FIELDS.map(([key, label, placeholder]) => (
-            <label key={key}>
-              {label}
-              <input
-                value={settings[key] || ""}
-                onChange={(event) =>
-                  setSettings({ ...settings, [key]: event.target.value })
-                }
-                placeholder={placeholder}
-              />
-            </label>
-          ))}
+          {SETTING_FIELDS.map(([key, label, placeholder]) => {
+            const locked = SIGNING_FIELDS.includes(key) && !canSign;
+            return (
+              <label key={key}>
+                {label}
+                <input
+                  value={settings[key] || ""}
+                  disabled={locked}
+                  onChange={(event) =>
+                    setSettings({ ...settings, [key]: event.target.value })
+                  }
+                  placeholder={placeholder}
+                />
+                {locked && <small>Only a superadmin can change this.</small>}
+              </label>
+            );
+          })}
         </div>
       </article>
 
@@ -932,6 +950,7 @@ export function SettingsPanel({ onError }) {
             <input
               type="file"
               accept=".docx,.doc"
+              disabled={!canSign}
               onChange={(event) => upload("template", event.target.files?.[0])}
             />
           </label>
@@ -950,6 +969,7 @@ export function SettingsPanel({ onError }) {
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
+              disabled={!canSign}
               onChange={(event) => upload("signature", event.target.files?.[0])}
             />
           </label>

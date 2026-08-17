@@ -59,38 +59,40 @@ export const SEXES = [
 ];
 
 /**
- * `code` is what the CSM Summary Report counts by. The report's region row is
- * generated from this list, so adding a region here flows through to the sheet.
+ * The official region names, in the order the office lists them.
+ *
+ * `code` is what the CSM Summary Report counts by, and these codes are
+ * deliberately unchanged from the portal's earlier, shorter labels — the
+ * report's region columns and every response already recorded still line up.
+ * The names are proper nouns, so there is no Tagalog variant to fall back to.
  */
 export const REGIONS = [
-  { value: "Region NCR", code: "NCR", en: "Region NCR", tl: "Rehiyon NCR" },
-  { value: "Region 1", code: "I", en: "Region 1", tl: "Rehiyon 1" },
-  { value: "Region 2", code: "II", en: "Region 2", tl: "Rehiyon 2" },
-  { value: "Region 3", code: "III", en: "Region 3", tl: "Rehiyon 3" },
-  { value: "Region 4", code: "IV-A", en: "Region 4", tl: "Rehiyon 4" },
-  { value: "Region 5", code: "V", en: "Region 5", tl: "Rehiyon 5" },
-  { value: "Region 6", code: "VI", en: "Region 6", tl: "Rehiyon 6" },
-  { value: "Region 7", code: "VII", en: "Region 7", tl: "Rehiyon 7" },
-  { value: "Region 8", code: "VIII", en: "Region 8", tl: "Rehiyon 8" },
-  { value: "Region 9", code: "IX", en: "Region 9", tl: "Rehiyon 9" },
-  { value: "Region 10", code: "X", en: "Region 10", tl: "Rehiyon 10" },
-  { value: "Region 11", code: "XI", en: "Region 11", tl: "Rehiyon 11" },
-  { value: "Region 12", code: "XII", en: "Region 12", tl: "Rehiyon 12" },
-  { value: "Region CAR", code: "CAR", en: "Region CAR", tl: "Rehiyon CAR" },
+  { value: "National Capital Region", code: "NCR", en: "National Capital Region" },
+  { value: "01 - Ilocos Region", code: "I", en: "01 - Ilocos Region" },
+  { value: "02 - Cagayan Valley", code: "II", en: "02 - Cagayan Valley" },
+  { value: "03 - Central Luzon", code: "III", en: "03 - Central Luzon" },
+  { value: "04 - CALABARZON", code: "IV-A", en: "04 - CALABARZON" },
+  { value: "05 - Bicol Region", code: "V", en: "05 - Bicol Region" },
+  { value: "06 - Western Visayas", code: "VI", en: "06 - Western Visayas" },
+  { value: "07 - Central Visayas", code: "VII", en: "07 - Central Visayas" },
+  { value: "08 - Eastern Visayas", code: "VIII", en: "08 - Eastern Visayas" },
+  { value: "09 - Zamboanga Peninsula", code: "IX", en: "09 - Zamboanga Peninsula" },
+  { value: "10 - Northern Mindanao", code: "X", en: "10 - Northern Mindanao" },
+  { value: "11 - Davao Region", code: "XI", en: "11 - Davao Region" },
+  { value: "12 - Soccsksargen", code: "XII", en: "12 - Soccsksargen" },
+  { value: "Caraga", code: "CARAGA", en: "Caraga" },
   {
-    value: "Region CARAGA",
-    code: "CARAGA",
-    en: "Region CARAGA",
-    tl: "Rehiyon CARAGA",
+    value: "Cordillera Administrative Region",
+    code: "CAR",
+    en: "Cordillera Administrative Region",
   },
   {
-    value: "Region MIMAROPA",
-    code: "IV-B",
-    en: "Region MIMAROPA",
-    tl: "Rehiyon MIMAROPA",
+    value: "Bangsamoro Autonomous Region in Muslim Mindanao",
+    code: "BARMM",
+    en: "Bangsamoro Autonomous Region in Muslim Mindanao",
   },
-  { value: "BARMM", code: "BARMM", en: "BARMM", tl: "BARMM" },
-  { value: "NIR", code: "NIR", en: "NIR", tl: "NIR" },
+  { value: "MIMAROPA", code: "IV-B", en: "MIMAROPA" },
+  { value: "Negros Island Region", code: "NIR", en: "Negros Island Region" },
 ];
 
 export const AGE_BRACKETS = [
@@ -130,7 +132,15 @@ export const DEFAULT_SERVICES = [
 
 export const OTHER_SERVICE_CODE = "OTHER";
 
-/** Citizen's Charter block. Option `value` is the number stored in the sheet. */
+/**
+ * Citizen's Charter block. Option `value` is the number stored in the sheet.
+ *
+ * The wording, the option sets and the N/A choices come from the harmonised
+ * CSM questionnaire in ARTA Memorandum Circular No. 2023-05 (s. 2023). N/A is
+ * prescribed, not optional: CC2 and CC3 ask about a Charter the client may
+ * never have seen, and CC1's fourth option instructs them to answer N/A there.
+ * Do not drop it — the reported figures would stop matching the circular.
+ */
 export const CC_QUESTIONS = [
   {
     id: "cc1",
@@ -254,6 +264,12 @@ export const SQD_QUESTIONS = [
   },
 ];
 
+/**
+ * The five-point Likert scale plus N/A, as prescribed by ARTA Memorandum
+ * Circular No. 2023-05 (s. 2023). N/A covers dimensions that genuinely do not
+ * apply to a transaction — SQD5 on a service that carries no fee, for example.
+ * `numericScores_` in the backend excludes it from every mean and median.
+ */
 export const SQD_SCALE = [
   {
     value: "1",

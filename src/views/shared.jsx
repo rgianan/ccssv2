@@ -5,7 +5,14 @@ import { navigate } from "../router";
 
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
 
-export const CHED_LOGO = "https://ik.imagekit.io/k2qmtccm6/CHED_Logo_New.png";
+/**
+ * The source file is 3000×3000 and 288 KB — larger than the whole JavaScript
+ * bundle — for a mark that renders at 38px. ImageKit resizes and re-encodes on
+ * the fly, which brings it to about 6 KB; `f-auto` serves WebP or AVIF where
+ * the browser accepts it. w-96 still covers a high-density display at 38px.
+ */
+export const CHED_LOGO =
+  "https://ik.imagekit.io/k2qmtccm6/CHED_Logo_New.png?tr=w-96,q-85,f-auto";
 
 export function TurnstileWidget({ action, onToken, resetKey = 0 }) {
   const container = useRef(null),
@@ -56,7 +63,11 @@ export function TurnstileWidget({ action, onToken, resetKey = 0 }) {
   return <div className="turnstile-wrap" ref={container} />;
 }
 
-export function Brand({ subtitle = "Client Satisfaction Measurement", light = false }) {
+export function Brand({
+  subtitle = "Client Satisfaction Measurement",
+  name = "CHED · OSDS",
+  light = false,
+}) {
   return (
     <a
       className={`brand${light ? " light" : ""}`}
@@ -67,9 +78,16 @@ export function Brand({ subtitle = "Client Satisfaction Measurement", light = fa
       }}
       title="Return to the CHED-OSDS portal home page"
     >
-      <img src={CHED_LOGO} alt="Commission on Higher Education logo" />
+      {/* Explicit dimensions reserve the box before the image arrives, so the
+          brand text does not jump when it does. */}
+      <img
+        src={CHED_LOGO}
+        alt="Commission on Higher Education logo"
+        width="38"
+        height="38"
+      />
       <span>
-        <strong>CHED&nbsp;·&nbsp;OSDS</strong>
+        <strong>{name}</strong>
         <small>{subtitle}</small>
       </span>
     </a>

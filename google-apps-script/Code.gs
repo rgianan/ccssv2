@@ -357,7 +357,7 @@ function setupCsmSheets() {
     ]);
     audit.sheet.getRange('A:A').setNumberFormat('@');
 
-    seedServices_(services.sheet);
+    var programsRestored = seedServices_(services.sheet);
     seedSettings_();
     // Setting up the sheets is the important part; a trigger that cannot be
     // installed is worth reporting, not worth failing the whole setup over.
@@ -374,6 +374,7 @@ function setupCsmSheets() {
       status: 'OK',
       spreadsheetUrl: ss.getUrl(),
       sessionPruneTrigger: triggerStatus,
+      programsRestored: programsRestored.length ? programsRestored : 'none missing',
       sheets: [responses, services, stats, settings, reports, whitelist, users, audit].map(function (result) {
         return { name: result.sheet.getName(), created: result.created, headersAdded: result.headersAdded };
       }),
@@ -390,22 +391,45 @@ var DEFAULT_SERVICES_ = [
   { code: 'OTHER', name_en: 'Other Services', name_tl: 'Iba pang Serbisyo', category: 'other' }
 ];
 
+/**
+ * Adds any default program the sheet is missing, matched by code.
+ *
+ * This used to return early if the sheet had a single row, so a Services tab
+ * that ended up partially populated stayed that way however often setup was
+ * re-run — and since the landing page and the survey list exactly what this
+ * sheet holds, the missing programs simply never appeared. Rows that already
+ * exist are left alone, including ones renamed or deactivated on purpose.
+ */
 function seedServices_(sheet) {
-  if (sheet.getLastRow() >= 2) return;
-  var hdr = getHeaderMap_(sheet), now = new Date();
+  var hdr = getHeaderMap_(sheet), now = new Date(), existing = {};
+  var codeCol = idxOf_(hdr, ['code']);
+  if (sheet.getLastRow() >= 2 && codeCol >= 0)
+    sheet.getRange(2, codeCol + 1, sheet.getLastRow() - 1, 1).getValues()
+      .forEach(function (row) {
+        var code = safeTrim_(row[0]).toUpperCase();
+        if (code) existing[code] = true;
+      });
+
+  var added = [];
   DEFAULT_SERVICES_.forEach(function (service, index) {
+    if (existing[service.code.toUpperCase()]) return;
     var row = new Array(sheet.getLastColumn()).fill('');
     row[hdr['service_id']] = 'S-' + Utilities.getUuid().replace(/-/g,'').slice(0, 8).toUpperCase();
-    row[hdr['code']] = service.code;
-    row[hdr['name_en']] = service.name_en;
-    row[hdr['name_tl']] = service.name_tl;
+    row[hdr['code']] = safeSheetValue_(service.code);
+    row[hdr['name_en']] = safeSheetValue_(service.name_en);
+    row[hdr['name_tl']] = safeSheetValue_(service.name_tl);
     row[hdr['category']] = service.category;
     row[hdr['active']] = true;
     row[hdr['sort_order']] = (index + 1) * 10;
     row[hdr['created_at']] = now;
     row[hdr['updated_at']] = now;
     sheet.appendRow(row);
+    added.push(service.code);
   });
+  // The public list is cached for 15 minutes; without this the restored
+  // programs would not show up on the portal until it expired.
+  if (added.length) invalidatePublicCache_();
+  return added;
 }
 
 function seedSettings_() {
@@ -591,7 +615,33 @@ function getPortalConfig() {
 
 // ------------------------------- Submission -----------------------------------
 
+/**
+ * Region name -> report code. The official names the form now offers are
+ * listed first; the portal's earlier, shorter labels are kept below them so
+ * responses recorded before the rename still resolve to the same code and the
+ * report's region columns stay continuous across the change.
+ */
 var REGION_CODES_ = {
+  'national capital region': 'NCR',
+  '01 - ilocos region': 'I',
+  '02 - cagayan valley': 'II',
+  '03 - central luzon': 'III',
+  '04 - calabarzon': 'IV-A',
+  '05 - bicol region': 'V',
+  '06 - western visayas': 'VI',
+  '07 - central visayas': 'VII',
+  '08 - eastern visayas': 'VIII',
+  '09 - zamboanga peninsula': 'IX',
+  '10 - northern mindanao': 'X',
+  '11 - davao region': 'XI',
+  '12 - soccsksargen': 'XII',
+  'caraga': 'CARAGA',
+  'cordillera administrative region': 'CAR',
+  'bangsamoro autonomous region in muslim mindanao': 'BARMM',
+  'mimaropa': 'IV-B',
+  'negros island region': 'NIR',
+
+  // Retired labels, still present in older rows.
   'region ncr': 'NCR', 'region 1': 'I', 'region 2': 'II', 'region 3': 'III', 'region 4': 'IV-A',
   'region 5': 'V', 'region 6': 'VI', 'region 7': 'VII', 'region 8': 'VIII', 'region 9': 'IX',
   'region 10': 'X', 'region 11': 'XI', 'region 12': 'XII', 'region car': 'CAR',
@@ -1030,6 +1080,14 @@ function adminGetResponses(filters, adminToken) {
   var limit = Math.min(500, Math.max(25, Number(filters.limit) || 100));
   var offset = Math.max(0, Number(filters.offset) || 0);
 
+  // Unfiltered paging is the common case, and it does not need the whole
+  // sheet: the rows wanted are a window at the end of it. Reading just that
+  // window keeps opening the Responses tab cheap however far the sheet grows.
+  if (!query && !serviceCode && !coaStatus && !period) {
+    var page = readResponseWindow_(offset, limit);
+    return { rows: page.rows.map(publicResponse_), total: page.total, offset: offset, limit: limit };
+  }
+
   var matched = readResponses_().rows.filter(function (record) {
     if (period && !inPeriod_(record, period)) return false;
     if (serviceCode && record.serviceCode.toUpperCase() !== serviceCode) return false;
@@ -1041,19 +1099,60 @@ function adminGetResponses(filters, adminToken) {
   });
 
   // Newest first, then page.
-  var page = matched.reverse().slice(offset, offset + limit).map(function (record) {
-    var out = {
-      referenceId: record.referenceId, transactionDate: record.transactionDate,
-      clientType: record.clientType, sex: record.sex, age: record.age,
-      region: record.region, serviceCode: record.serviceCode, serviceName: record.serviceName,
-      otherService: record.otherService, email: record.email, suggestions: record.suggestions,
-      overall: round2_(record.overall), coaStatus: record.coaStatus
-    };
-    CC_KEYS.concat(SQD_KEYS).forEach(function (key) { out[key] = record[key]; });
-    return out;
-  });
+  return {
+    rows: matched.reverse().slice(offset, offset + limit).map(publicResponse_),
+    total: matched.length,
+    offset: offset,
+    limit: limit
+  };
+}
 
-  return { rows: page, total: matched.length, offset: offset, limit: limit };
+/** The response shape the admin table consumes. */
+function publicResponse_(record) {
+  var out = {
+    referenceId: record.referenceId, transactionDate: record.transactionDate,
+    clientType: record.clientType, sex: record.sex, age: record.age,
+    region: record.region, serviceCode: record.serviceCode, serviceName: record.serviceName,
+    otherService: record.otherService, email: record.email, suggestions: record.suggestions,
+    overall: round2_(record.overall), coaStatus: record.coaStatus
+  };
+  CC_KEYS.concat(SQD_KEYS).forEach(function (key) { out[key] = record[key]; });
+  return out;
+}
+
+/**
+ * Reads one page from the end of the sheet, newest first, without parsing the
+ * rows before it. `total` is taken from the sheet's own row count rather than
+ * from a parse, so it stays exact without the cost.
+ */
+function readResponseWindow_(offset, limit) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES);
+  if (!sh || sh.getLastRow() < 2) return { rows: [], total: 0 };
+  var hdr = getHeaderMap_(sh), col = responseFieldColumns_(hdr);
+  if (col.referenceId < 0) return { rows: [], total: 0 };
+
+  // The reference column alone says which rows are real and how many there
+  // are — an exact count, at a fraction of the cost of parsing every column.
+  // Reading the sheet's row count instead would include any blank row.
+  var refs = sh.getRange(2, col.referenceId + 1, sh.getLastRow() - 1, 1).getValues();
+  var rowNumbers = [];
+  for (var i = 0; i < refs.length; i++)
+    if (safeTrim_(refs[i][0])) rowNumbers.push(i + 2);
+  rowNumbers.reverse();                                   // newest first
+
+  var total = rowNumbers.length;
+  var wanted = rowNumbers.slice(offset, offset + limit);
+  if (!wanted.length) return { rows: [], total: total };
+
+  // One block read covers the page; only those rows are built into records.
+  var top = Math.min.apply(null, wanted), bottom = Math.max.apply(null, wanted);
+  var block = sh.getRange(top, 1, bottom - top + 1, sh.getLastColumn()).getValues();
+  return {
+    rows: wanted.map(function (rowNumber) {
+      return buildResponseRecord_(block[rowNumber - top], col, rowNumber);
+    }),
+    total: total
+  };
 }
 
 // --------------------------- Service statistics --------------------------------
@@ -1415,17 +1514,38 @@ function adminGetSettings(adminToken) {
   return readSettings_();
 }
 
+/**
+ * These decide whose name and signature appear on an issued certificate, and
+ * which template it is built from. Changing them is effectively signing on
+ * someone else's behalf, so they are held to superadmin rather than to any
+ * administrator who can reach the Settings page.
+ */
+var SIGNING_SETTINGS_ = [
+  'coa_signatory', 'coa_designation',
+  'coa_template_id', 'coa_template_name',
+  'coa_signature_id', 'coa_signature_name'
+];
+
 function adminSaveSettings(settings, adminToken) {
-  requireAdmin_(adminToken);
+  var session = requireAdmin_(adminToken);
   var allowed = [
-    'office_name','coa_signatory','coa_designation',
+    'office_name',
     'report_prepared_by','report_prepared_title','report_reviewed_by','report_reviewed_title',
-    'report_approved_by','report_approved_title',
-    'coa_template_id','coa_template_name','coa_signature_id','coa_signature_name'
-  ];
+    'report_approved_by','report_approved_title'
+  ].concat(SIGNING_SETTINGS_);
+
+  var isSuperadmin = safeTrim_(session.role).toLowerCase() === 'superadmin';
   var updates = {};
   allowed.forEach(function (key) {
-    if (key in settings) updates[key] = safeTrim_(settings[key]).slice(0, 300);
+    if (!(key in settings)) return;
+    var value = safeTrim_(settings[key]).slice(0, 300);
+    if (!isSuperadmin && SIGNING_SETTINGS_.indexOf(key) >= 0) {
+      // Silently dropping it would look like a save that worked.
+      if (value !== safeTrim_(readSettings_()[key]))
+        throw new Error('Only a superadmin can change the certificate signatory, designation, template or e-signature.');
+      return;
+    }
+    updates[key] = value;
   });
   return writeSettings_(updates);
 }

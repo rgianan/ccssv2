@@ -631,9 +631,9 @@ export function SurveyForm() {
                       <option value="">
                         {language === "tl" ? "Pumili" : "Select"}
                       </option>
-                      {REGIONS.map((region, index) => (
+                      {REGIONS.map((region) => (
                         <option key={region.value} value={region.value}>
-                          {index + 1}. {t(region, language)}
+                          {t(region, language)}
                         </option>
                       ))}
                     </select>

@@ -181,43 +181,6 @@
   color: #58749d;
 }
 
-/* ------------------------------ Metric band ------------------------------ */
-
-.metric-band {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 0 clamp(20px, 5vw, 64px);
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1px;
-  background: var(--border);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-}
-.metric-band {
-  padding: 0;
-  max-width: 1160px;
-}
-.metric-band article {
-  background: #fff;
-  padding: 26px 22px;
-  text-align: center;
-}
-.metric-band strong {
-  display: block;
-  font: 800 32px Manrope, sans-serif;
-  color: var(--blue);
-}
-.metric-band span {
-  display: block;
-  margin-top: 5px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--muted);
-}
-
 /* -------------------------------- Sections ------------------------------- */
 
 .section {
@@ -444,20 +407,45 @@
   justify-items: center;
   text-align: center;
 }
-.landing-footer p {
-  max-width: 620px;
-  font-size: 12.5px;
-  line-height: 1.7;
-  margin: 0;
-}
-.landing-footer-links {
+.footer-contact {
   display: flex;
-  gap: 20px;
-  font-size: 12px;
-  font-weight: 700;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
 }
-.landing-footer-links a:hover {
+.footer-contact span {
+  font-weight: 700;
+  color: #8fa8c4;
+}
+.footer-contact a {
+  font-weight: 700;
+  color: #dfeaf7;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+  padding-bottom: 1px;
+}
+.footer-contact a:hover {
   color: #fff;
+  border-bottom-color: rgba(255, 255, 255, 0.6);
+}
+
+.footer-social {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #cfe0f5;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 9px 18px;
+}
+.footer-social:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 @media (max-width: 960px) {
@@ -468,9 +456,6 @@
   .hero-card,
   .coa-preview {
     transform: none;
-  }
-  .metric-band {
-    grid-template-columns: repeat(2, 1fr);
   }
   .landing-nav nav {
     display: none;

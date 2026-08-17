@@ -4,7 +4,6 @@ import { App } from "./App";
 import "./styles/base.css";
 import "./styles/landing.css";
 import "./styles/survey.css";
-import "./styles/admin.css";
 import "./styles/verification.css";
 
 createRoot(document.getElementById("root")).render(

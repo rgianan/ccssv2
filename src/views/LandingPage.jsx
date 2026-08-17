@@ -20,49 +20,60 @@ import { navigate } from "../router";
 
 const PROGRAM_ICONS = [Stethoscope, GraduationCap, ClipboardCheck, Plane];
 
+/** lucide dropped its brand icons, so the Facebook mark is inlined. */
+function FacebookMark() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true">
+      <path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.9h2.54V9.85c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.78-1.63 1.57v1.88h2.78l-.45 2.9h-2.33V22c4.78-.76 8.44-4.92 8.44-9.94Z" />
+    </svg>
+  );
+}
+
+/** Written for the client filling the form, not for the office reading the
+ *  report — no internal shorthand, no form-numbering, nothing to look up. */
 const HOW_IT_WORKS = [
   {
     icon: FileSignature,
     en: {
-      title: "Request a Certificate of Appearance",
-      body: "The very first question asks whether you need a Certificate of Appearance. Choose yes and we collect the few details needed to issue it.",
+      title: "Ask for your Certificate of Appearance",
+      body: "The first question asks if you need one. Say yes, give us a few details, and we will prepare it for you.",
     },
     tl: {
-      title: "Humiling ng Certificate of Appearance",
-      body: "Ang unang tanong ay kung kailangan mo ng Certificate of Appearance. Piliin ang oo at kukunin namin ang ilang detalyeng kailangan para maibigay ito.",
+      title: "Humingi ng Certificate of Appearance",
+      body: "Ang unang tanong ay kung kailangan mo nito. Sagutin ng oo, magbigay ng ilang detalye, at ihahanda namin ito para sa iyo.",
     },
   },
   {
     icon: ClipboardCheck,
     en: {
-      title: "Tell us about your transaction",
-      body: "Client type, date, sex, age, region, and the OSDS service you availed of.",
+      title: "Tell us why you came",
+      body: "A few quick details about you and the service you came here for.",
     },
     tl: {
-      title: "Ibahagi ang tungkol sa iyong transaksyon",
-      body: "Uri ng kliyente, petsa, kasarian, edad, rehiyon, at ang serbisyong OSDS na iyong nakuha.",
+      title: "Sabihin kung bakit ka pumunta",
+      body: "Ilang mabilis na detalye tungkol sa iyo at sa serbisyong iyong pinuntahan.",
     },
   },
   {
     icon: BadgeCheck,
     en: {
-      title: "Rate the service",
-      body: "Three Citizen's Charter questions and the nine Service Quality Dimensions, in English or Tagalog.",
+      title: "Tell us how we did",
+      body: "Short questions about your visit — how long it took, how you were treated, and whether you got what you needed. In English or Tagalog.",
     },
     tl: {
-      title: "Iratings ang serbisyo",
-      body: "Tatlong tanong tungkol sa Citizen's Charter at ang siyam na Service Quality Dimensions, sa Ingles o Tagalog.",
+      title: "Sabihin kung kumusta ang serbisyo",
+      body: "Maiikling tanong tungkol sa iyong pagpunta — gaano ito katagal, kung paano ka trinato, at kung nakuha mo ang kailangan mo. Sa Ingles o Tagalog.",
     },
   },
   {
     icon: CalendarCheck,
     en: {
-      title: "We act on it",
-      body: "Responses roll up into the quarterly and annual CSM Summary Report submitted by this office.",
+      title: "We use your answers",
+      body: "Your feedback shows us what to fix, and goes into the report we submit on how well this office serves the public.",
     },
     tl: {
-      title: "Aaksyunan namin ito",
-      body: "Ang mga sagot ay pinagsasama sa quarterly at annual na CSM Summary Report na isinusumite ng tanggapang ito.",
+      title: "Ginagamit namin ang iyong sagot",
+      body: "Ipinapakita ng iyong puna kung ano ang dapat naming ayusin, at kasama ito sa ulat namin kung gaano kami kahusay maglingkod sa publiko.",
     },
   },
 ];
@@ -216,23 +227,6 @@ export function LandingPage() {
         </aside>
       </section>
 
-      <section className="metric-band">
-        {[
-          [
-            programs.length,
-            language === "tl" ? "Pangunahing programa" : "Main programs",
-          ],
-          ["9", language === "tl" ? "Service Quality Dimensions" : "Service Quality Dimensions"],
-          ["3", language === "tl" ? "Tanong sa Citizen's Charter" : "Citizen's Charter questions"],
-          ["2", language === "tl" ? "Wika" : "Languages"],
-        ].map(([value, label]) => (
-          <article key={label}>
-            <strong>{value}</strong>
-            <span>{label}</span>
-          </article>
-        ))}
-      </section>
-
       <section className="section" id="programs">
         <div className="section-head">
           <p className="eyebrow">
@@ -347,47 +341,35 @@ export function LandingPage() {
           </p>
           <footer>
             <span />
-            <small>Signatory · Designation · OSDS</small>
+            <small>Signatory · Designation</small>
           </footer>
         </figure>
       </section>
 
       <footer className="landing-footer">
-        <Brand light subtitle="Office of Student Development and Services" />
-        <p>
-          {language === "tl"
-            ? "Ang datos na nakalap dito ay ginagamit lamang para sa Client Satisfaction Measurement at para sa mga hinihiling na Certificate of Appearance."
-            : "Data collected here is used only for Client Satisfaction Measurement and for requested Certificates of Appearance."}
-        </p>
-        <div className="landing-footer-links">
-          <a
-            href="/survey"
-            onClick={(event) => {
-              event.preventDefault();
-              navigate("/survey");
-            }}
-          >
-            {language === "tl" ? "Survey" : "Survey"}
-          </a>
-          <a
-            href="/verification"
-            onClick={(event) => {
-              event.preventDefault();
-              navigate("/verification");
-            }}
-          >
-            {language === "tl" ? "Beripikasyon" : "Verification"}
-          </a>
-          <a
-            href="/admin"
-            onClick={(event) => {
-              event.preventDefault();
-              navigate("/admin");
-            }}
-          >
-            {language === "tl" ? "Admin" : "Admin"}
-          </a>
+        <Brand
+          light
+          name="Commission on Higher Education"
+          subtitle="Office of Student Development and Services"
+        />
+        {/* Most clients reach this on a phone, so the numbers dial directly. */}
+        <div className="footer-contact">
+          <span>{language === "tl" ? "Tumawag sa amin:" : "Contact us:"}</span>
+          <a href="tel:+63284411220">(02)8441-1220</a>
+          <a href="tel:+63289880001">(02)8988-0001</a>
         </div>
+        <a
+          className="footer-social"
+          href="https://fb.com/osds.chedco"
+          target="_blank"
+          rel="noreferrer noopener"
+          title="Open the OSDS page on Facebook"
+        >
+          <FacebookMark />
+          {language === "tl"
+            ? "Sundan ang OSDS sa Facebook"
+            : "Follow OSDS on Facebook"}
+        </a>
       </footer>
     </div>
   );

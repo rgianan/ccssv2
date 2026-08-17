@@ -10,7 +10,13 @@
       "Bash('/c/Program Files/7-Zip/7z.exe' x 'C:/Users/ginb/Downloads/Copy of coa_template.docx' -oC:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/coa -y)",
       "Bash('/c/Program Files/7-Zip/7z.exe' x 'C:/Users/ginb/Downloads/CSM Summary Report OSDS 1st QUARTER.xlsx' -oC:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/csmxlsx -y)",
       "Bash(node C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/dump.mjs C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad)",
-      "Bash(node C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/xlsx.mjs C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad)"
+      "Bash(node C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad/xlsx.mjs C:/Users/ginb/AppData/Local/Temp/claude/C--projects-ccssv2/85fdedd4-919a-4f34-9b50-02c85ceeda6e/scratchpad)",
+      "Bash(node -e \"const l=require\\('./node_modules/lucide-react/package.json'\\);console.log\\('lucide-react',l.version\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(npm run *)",
+      "Bash(node serve.mjs)",
+      "Bash(npx vite *)",
+      "Bash(node --input-type=module -e ' *)"
     ]
   }
 }

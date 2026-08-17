@@ -33,6 +33,9 @@ import {
   UsersPanel,
 } from "./AdminPanels";
 import { navigate } from "../router";
+// Loaded with this chunk, not with the public bundle: a client filling the
+// survey has no use for the admin stylesheet.
+import "../styles/admin.css";
 
 function AdminLogin({ onAuthenticated }) {
   const [email, setEmail] = useState(""),
@@ -265,7 +268,9 @@ export function AdminDashboard() {
           <ReportsPanel period={period} onError={handleError} />
         )}
         {tab === "services" && <ServicesPanel onError={handleError} />}
-        {tab === "settings" && <SettingsPanel onError={handleError} />}
+        {tab === "settings" && (
+          <SettingsPanel onError={handleError} canSign={isSuperadmin} />
+        )}
         {tab === "users" && isSuperadmin && <UsersPanel onError={handleError} />}
         {tab === "audit" && isSuperadmin && <AuditPanel onError={handleError} />}
       </main>

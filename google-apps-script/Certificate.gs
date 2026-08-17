@@ -395,7 +395,9 @@ function sendCoaEmail_(record, certificateUrl, verificationCode, verificationUrl
 // -------------------------------- Uploads --------------------------------------
 
 function adminUploadCoaTemplate(fileObj, adminToken) {
-  requireAdmin_(adminToken);
+  // The template decides what an issued certificate says; same gate as the
+  // signatory setting it is used with.
+  requireSuperadmin_(adminToken);
   if (!fileObj || !fileObj.base64 || !fileObj.filename) throw new Error('No file payload.');
   if (!/\.docx?$/i.test(fileObj.filename))
     throw new Error('The certificate template must be a Word (.doc or .docx) file.');
@@ -412,7 +414,7 @@ function adminUploadCoaTemplate(fileObj, adminToken) {
 }
 
 function adminUploadSignature(fileObj, adminToken) {
-  requireAdmin_(adminToken);
+  requireSuperadmin_(adminToken);
   if (!fileObj || !fileObj.base64 || !fileObj.filename ||
       !/^image\/(png|jpeg|webp)$/i.test(String(fileObj.mimeType || '')) ||
       fileObj.base64.length > 2800000)

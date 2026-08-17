@@ -377,12 +377,12 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
     });
     meanMatrix.push(means);
     medianMatrix.push(medians);
-    var values = [index + 1, entry.name].concat(pairs).concat([
+    var values = [index + 1, safeSheetValue_(entry.name)].concat(pairs).concat([
       overallScore_(entry.records),
       entry.records.length,
       countOrBlank(entry.stat.clients),
       countOrBlank(entry.stat.transactions),
-      entry.stat.remarks || ''
+      safeSheetValue_(entry.stat.remarks || '')
     ]);
     sheet.getRange(dataRow, 1, 1, values.length).setValues([values]);
     dataRow++;
@@ -469,7 +469,7 @@ function buildServiceSheet_(ss, period, settings, service, records) {
   sheet.getRange(2, 1).setValue(period.type === 'year' ? 'PERIOD:' : 'QUARTER:').setFontWeight('bold');
   sheet.getRange(2, 2).setValue(period.label);
   sheet.getRange(3, 1).setValue('SERVICE NAME:').setFontWeight('bold');
-  sheet.getRange(3, 2, 1, 9).merge().setValue(service.name_en).setWrap(true);
+  sheet.getRange(3, 2, 1, 9).merge().setValue(safeSheetValue_(service.name_en)).setWrap(true);
 
   sheet.getRange(5, 1, 3, 1).merge().setValue('Client #')
     .setFontWeight('bold').setVerticalAlignment('middle').setHorizontalAlignment('center');
@@ -563,7 +563,16 @@ function buildDataSheet_(ss, records) {
           var value = Number(record[dimension.key]);
           return value >= 1 && value <= 5 ? value : 'N/A';
         }))
-        .concat([record.email, record.suggestions, record.referenceId, record.transactionDate]);
+        .concat([
+          record.email,
+          // The Responses sheet stores this escaped, but Sheets treats the
+          // leading apostrophe as formatting and strips it on read — so the
+          // raw text arrives here and would become a live formula in the
+          // workbook an officer opens. Escape again on the way out.
+          safeSheetValue_(record.suggestions),
+          record.referenceId,
+          record.transactionDate
+        ]);
     });
     sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }

@@ -32,10 +32,22 @@ var CC_KEYS = ['cc1','cc2','cc3'];
  * the circular those positions are N/A, which is listed separately.
  */
 var CC_OPTIONS_ = {
-  cc1: ['1','2','3','4','N/A'],
-  cc2: ['1','2','3','4','N/A'],
-  cc3: ['1','2','3','N/A']
+  cc1: ['1','2','3','4'],
+  cc2: ['1','2','3','4'],
+  cc3: ['1','2','3']
 };
+
+/**
+ * CC1's fourth choice: the client has never encountered a Citizen's Charter.
+ *
+ * Must equal CC_UNAWARE_VALUE in src/lib/csm.js. The two live in different
+ * runtimes and cannot share a definition, and a divergence does not fail
+ * loudly — the browser would hide CC2 and CC3 for one option while the server
+ * still demanded answers for it, leaving the client staring at "Please answer
+ * all Citizen's Charter questions" with no such questions on screen. If you
+ * reorder CC1's options, change both.
+ */
+var CC_UNAWARE_VALUE_ = '4';
 
 var SQD_OPTIONS_ = ['1','2','3','4','5','N/A'];
 /** Where a fee is charged every client pays one, so there is no N/A to give. */
@@ -801,11 +813,24 @@ function submitResponse(formData) {
   if (age && (!/^\d{1,3}$/.test(age) || Number(age) < 1 || Number(age) > 120))
     return { status: 'BAD_REQUEST', message: 'Age must be between 1 and 120.' };
 
+  // CC2 and CC3 ask about a Charter the client has seen, so a client who says
+  // they have never encountered one is not asked them and is recorded as N/A.
+  // Decided here rather than taken on trust from the browser: the form can be
+  // bypassed, and a rating of a document the respondent never saw is noise in
+  // the filed table.
+  var ccAnswers = {};
+  CC_KEYS.forEach(function (key) { ccAnswers[key] = safeTrim_(formData[key]); });
+  var unawareOfCharter = ccAnswers.cc1 === CC_UNAWARE_VALUE_;
+  if (unawareOfCharter) { ccAnswers.cc2 = 'N/A'; ccAnswers.cc3 = 'N/A'; }
+
   // Each question is checked against the choices it actually offers, so a
   // value the report has no column for cannot be stored.
-  for (var c = 0; c < CC_KEYS.length; c++)
-    if (CC_OPTIONS_[CC_KEYS[c]].indexOf(safeTrim_(formData[CC_KEYS[c]])) < 0)
+  for (var c = 0; c < CC_KEYS.length; c++) {
+    var ccKey = CC_KEYS[c];
+    var ccAllowed = unawareOfCharter && ccKey !== 'cc1' ? ['N/A'] : CC_OPTIONS_[ccKey];
+    if (ccAllowed.indexOf(ccAnswers[ccKey]) < 0)
       return { status: 'BAD_REQUEST', message: 'Please answer all Citizen’s Charter questions.' };
+  }
 
   // SQD5 asks about fees, so it is only put to clients of a service that
   // charges them. Everyone else is recorded as N/A, decided here rather than
@@ -888,7 +913,7 @@ function submitResponse(formData) {
     put(['servicecode'], service.code);
     put(['servicename'], service.name_en);
     put(['otherservice'], otherService);
-    CC_KEYS.forEach(function (key) { put([key], safeTrim_(formData[key])); });
+    CC_KEYS.forEach(function (key) { put([key], ccAnswers[key]); });
     SQD_KEYS.forEach(function (key) { put([key], sqdAnswers[key]); });
     put(['suggestions'], safeTrim_(formData.suggestions).slice(0, 1500));
     put(['email'], email);

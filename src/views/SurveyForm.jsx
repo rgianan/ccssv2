@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import {
-  CC_QUESTIONS,
+  CC_UNAWARE_VALUE,
   CLIENT_TYPES,
   COPY,
   COURTESY_TITLES,
@@ -19,6 +19,8 @@ import {
   REGIONS,
   SEXES,
   SQD_SCALE,
+  ccAnswers,
+  ccApplicable,
   portalToday,
   sqdAnswers,
   sqdApplicable,
@@ -196,7 +198,7 @@ export function SurveyForm() {
         (!isOtherService || form.otherService.trim()) &&
         (!form.age || (Number(form.age) >= 1 && Number(form.age) <= 120))
       );
-    if (step === 2) return CC_QUESTIONS.every((question) => cc[question.id]);
+    if (step === 2) return ccApplicable(cc).every((question) => cc[question.id]);
     if (step === 3)
       return sqdApplicable(selectedService).every((question) => sqd[question.id]);
     return true;
@@ -244,9 +246,7 @@ export function SurveyForm() {
         language,
         serviceCode: selectedService?.code || "",
         serviceName: selectedService?.name_en || "",
-        ...Object.fromEntries(
-          CC_QUESTIONS.map((question) => [question.id, cc[question.id] || ""]),
-        ),
+        ...ccAnswers(cc),
         ...sqdAnswers(sqd, selectedService),
       };
       const result = await submitResponse(
@@ -709,7 +709,7 @@ export function SurveyForm() {
                     <p>{t(COPY.ccIntro, language)}</p>
                   </div>
                 </div>
-                {CC_QUESTIONS.map((question) => (
+                {ccApplicable(cc).map((question) => (
                   <fieldset className="field-block" key={question.id}>
                     <legend>
                       <span className="sqd-number">{question.number}</span>
@@ -726,6 +726,14 @@ export function SurveyForm() {
                     />
                   </fieldset>
                 ))}
+                {cc.cc1 === CC_UNAWARE_VALUE && (
+                  <div className="notice">
+                    <Info size={15} />
+                    {language === "tl"
+                      ? "Salamat — ang natitirang tanong tungkol sa Citizen's Charter ay hindi na kailangang sagutan. Magpatuloy sa susunod na bahagi."
+                      : "Thanks — the remaining Citizen's Charter questions do not apply to you. Continue to the next section."}
+                  </div>
+                )}
               </>
             )}
 

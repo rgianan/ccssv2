@@ -22,7 +22,7 @@ import {
   readAdminSession,
 } from "../lib/api";
 import { Brand, TurnstileWidget } from "./shared";
-import { CC_QUESTIONS, SQD_QUESTIONS } from "../lib/csm";
+import { CC_QUESTIONS, SQD_QUESTIONS, ccTallyOptions } from "../lib/csm";
 import { PeriodPicker, currentPeriod, describePeriod } from "./PeriodPicker";
 import {
   AuditPanel,
@@ -428,7 +428,7 @@ function OverviewPanel({ period, onError }) {
               <div key={question.id}>
                 <h3>{question.number}</h3>
                 <ul>
-                  {question.options.map((option) => (
+                  {ccTallyOptions(question).map((option) => (
                     <li key={option.value}>
                       <span>
                         {option.value === "N/A"

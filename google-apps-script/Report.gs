@@ -54,9 +54,9 @@ var SQD_DIMENSIONS_ = [
  * reading "Opt 5: 0" would take it to mean nobody chose option 5.
  */
 var CC_LABELS_ = {
-  cc1: { text: 'CC1. Which of the following best describes your awareness of the CC?', options: ['1','2','3','4'] },
-  cc2: { text: 'CC2. If aware of CC (answered 1-3 in CC1), would you say that the CC of this office was…', options: ['1','2','3','4'] },
-  cc3: { text: 'CC3. If aware of CC (answered 1-3 in CC1), how much did the CC help you in your transaction?', options: ['1','2','3'] }
+  cc1: { text: 'CC1. Which of the following best describes your awareness of the CC?', options: ['1','2','3','4'], na: false },
+  cc2: { text: 'CC2. If aware of CC (answered 1-3 in CC1), would you say that the CC of this office was…', options: ['1','2','3','4'], na: true },
+  cc3: { text: 'CC3. If aware of CC (answered 1-3 in CC1), how much did the CC help you in your transaction?', options: ['1','2','3'], na: true }
 };
 
 var REGION_ORDER_ = ['I','II','III','IV-A','IV-B','V','VI','VII','VIII','IX','X','XI','XII','NCR','CAR','CARAGA','BARMM','NIR'];
@@ -186,32 +186,52 @@ function shareReportWithAdmins_(file, actorEmail) {
 }
 
 /**
- * Applies the office's standing position on fees to every response in the
- * report, whenever it was collected.
+ * Applies the rules the form now enforces to every response in the report,
+ * whenever it was collected.
  *
- * The survey used to ask SQD5 of everyone, so responses recorded before the
- * fees flag existed carry a Costs rating even for programmes that charge
- * nothing. Left alone, a report spanning that change would compute Costs for a
- * fee-free programme from only its earlier respondents — a partial sample
- * presented as a finished figure — and the column would shift partway through
- * the period with nothing to mark it.
+ * Both rules arrived after data had already been gathered, and in each case
+ * the earlier form asked a question it no longer asks:
  *
- * Reading those ratings as N/A gives every period the same answer: Costs is
- * reported for the programmes that charge a fee and reads N/A for the rest.
- * The Responses sheet is untouched; this is how the report interprets it.
+ *   Costs — SQD5 is put only to clients of a fee-charging programme. Responses
+ *   from before the fees flag existed carry a Costs rating even for programmes
+ *   that charge nothing.
+ *
+ *   Charter — CC2 and CC3 are put only to clients who have seen a Citizen's
+ *   Charter. The earlier form merely instructed the unaware to answer N/A and
+ *   did not enforce it, so earlier responses can carry real ratings alongside
+ *   CC1 = "I do not know what a CC is".
+ *
+ * Left alone, a period spanning either change counts the same respondent in
+ * different columns depending on when they answered, with nothing in the
+ * workbook to mark the boundary — and the N/A counts understate how many
+ * people the question never applied to. Reading those answers as N/A gives
+ * every period one consistent answer.
+ *
+ * The Responses sheet is untouched; this is only how the report reads it.
  */
-function applyFeePolicy_(records, services) {
+function applyAnswerPolicy_(records, services) {
   var charges = {};
   services.forEach(function (service) {
     if (service.has_fees) charges[service.service_id] = true;
   });
+
   return records.map(function (record) {
-    if (charges[record.serviceId] || record.sqd5 === 'N/A') return record;
+    var costsDoNotApply = charges[record.serviceId] !== true && record.sqd5 !== 'N/A';
+    var charterDoesNotApply = record.cc1 === CC_UNAWARE_VALUE_ &&
+      (record.cc2 !== 'N/A' || record.cc3 !== 'N/A');
+    if (!costsDoNotApply && !charterDoesNotApply) return record;
+
     var copy = {};
     Object.keys(record).forEach(function (key) { copy[key] = record[key]; });
-    copy.sqd5 = 'N/A';
-    // overall is derived from the SQD answers, so it has to be recomputed.
-    copy.overall = meanOf_(SQD_KEYS.map(function (key) { return copy[key]; }));
+    if (costsDoNotApply) {
+      copy.sqd5 = 'N/A';
+      // overall is derived from the SQD answers, so it has to be recomputed.
+      copy.overall = meanOf_(SQD_KEYS.map(function (key) { return copy[key]; }));
+    }
+    if (charterDoesNotApply) {
+      copy.cc2 = 'N/A';
+      copy.cc3 = 'N/A';
+    }
     return copy;
   });
 }
@@ -219,7 +239,7 @@ function applyFeePolicy_(records, services) {
 function buildReport_(period, actorEmail, folder) {
   var settings = readSettings_();
   var services = readServices_();
-  var records = applyFeePolicy_(
+  var records = applyAnswerPolicy_(
     readResponses_().rows.filter(function (record) { return inPeriod_(record, period); }),
     services,
   );
@@ -378,12 +398,18 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
   ['cc1','cc2','cc3'].forEach(function (key) {
     var meta = CC_LABELS_[key];
     var counts = countBy_(records, function (record) { return record[key] || 'N/A'; });
-    var headers = meta.options.map(function (option) { return 'Opt ' + option; }).concat(['N/A','Total']);
+    // Only the questions that can actually be skipped get an N/A column. CC1
+    // is always answered, so one there would print a permanent zero.
+    var tail = meta.na ? ['N/A','Total'] : ['Total'];
+    var counted = meta.options.map(function (option) { return counts[option] || 0; });
+    if (meta.na) counted.push(counts['N/A'] || 0);
+    counted.push(records.length);
+
+    var headers = meta.options.map(function (option) { return 'Opt ' + option; }).concat(tail);
     writeRow_(sheet, row, 3, headers);
     styleHeaderRow_(sheet, row, 3, headers.length);
     sheet.getRange(row + 1, 2).setValue(meta.text).setWrap(true);
-    writeRow_(sheet, row + 1, 3, meta.options.map(function (option) { return counts[option] || 0; })
-      .concat([counts['N/A'] || 0, records.length]));
+    writeRow_(sheet, row + 1, 3, counted);
     row += 3;
   });
 

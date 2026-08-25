@@ -135,11 +135,14 @@ export const OTHER_SERVICE_CODE = "OTHER";
 /**
  * Citizen's Charter block. Option `value` is the number stored in the sheet.
  *
- * The wording, the option sets and the N/A choices come from the harmonised
- * CSM questionnaire in ARTA Memorandum Circular No. 2023-05 (s. 2023). N/A is
- * prescribed, not optional: CC2 and CC3 ask about a Charter the client may
- * never have seen, and CC1's fourth option instructs them to answer N/A there.
- * Do not drop it — the reported figures would stop matching the circular.
+ * The wording and the option sets follow the harmonised CSM questionnaire in
+ * ARTA Memorandum Circular No. 2023-05 (s. 2023). N/A remains a stored value
+ * and still appears in the report exactly as the circular expects — it is
+ * simply no longer a button. CC2 and CC3 ask about a Charter the client has
+ * seen, so a client who picks CC1's fourth option is not shown them at all and
+ * is recorded as N/A automatically. That is clearer than asking someone to
+ * classify their own answer as inapplicable, and it is better data: nobody
+ * rates the visibility of a document they have just said they never saw.
  */
 export const CC_QUESTIONS = [
   {
@@ -165,8 +168,8 @@ export const CC_QUESTIONS = [
       },
       {
         value: "4",
-        en: "I do not know what a CC is and I did not see one in this office. (Answer 'N/A' on CC2 and CC3)",
-        tl: "Hindi ko alam kung ano ang CC at wala akong nakita sa napuntahang opisina. (Sagutan ng 'N/A' ang CC2 at CC3)",
+        en: "I do not know what a CC is and I did not see one in this office.",
+        tl: "Hindi ko alam kung ano ang CC at wala akong nakita sa napuntahang opisina.",
       },
     ],
   },
@@ -180,7 +183,6 @@ export const CC_QUESTIONS = [
       { value: "2", en: "Somewhat easy to see", tl: "Medyo madaling makita" },
       { value: "3", en: "Difficult to see", tl: "Mahirap makita" },
       { value: "4", en: "Not visible at all", tl: "Hindi makita" },
-      { value: "N/A", en: "N/A", tl: "N/A" },
     ],
   },
   {
@@ -192,7 +194,6 @@ export const CC_QUESTIONS = [
       { value: "1", en: "Helped very much", tl: "Sobrang nakatulong" },
       { value: "2", en: "Somewhat helped", tl: "Medyo nakatulong" },
       { value: "3", en: "Did not help", tl: "Hindi nakatulong" },
-      { value: "N/A", en: "N/A", tl: "N/A" },
     ],
   },
 ];
@@ -289,6 +290,43 @@ export const SQD_SCALE = [
   { value: "4", emoji: "🙂", en: "Agree", tl: "Sumasang-ayon" },
   { value: "5", emoji: "😄", en: "Strongly Agree", tl: "Lubos na Sumasang-ayon" },
 ];
+
+/**
+ * CC1's fourth choice: the client has never encountered a Citizen's Charter.
+ * Must equal CC_UNAWARE_VALUE_ in google-apps-script/Code.gs — see the note
+ * there for what a divergence does to a client mid-survey.
+ */
+export const CC_UNAWARE_VALUE = "4";
+
+/**
+ * The Charter questions to actually ask. All three are shown up front so the
+ * client can see how long the step is; only the minority who say they do not
+ * know the Charter see CC2 and CC3 drop away, and a step getting shorter reads
+ * far better than two questions appearing after an answer.
+ */
+export const ccApplicable = (cc) =>
+  cc.cc1 === CC_UNAWARE_VALUE ? CC_QUESTIONS.slice(0, 1) : CC_QUESTIONS;
+
+/** All three, with anything that was not asked recorded as N/A. */
+export const ccAnswers = (cc) =>
+  Object.fromEntries(
+    CC_QUESTIONS.map((question) => [
+      question.id,
+      cc.cc1 === CC_UNAWARE_VALUE && question.id !== "cc1"
+        ? "N/A"
+        : cc[question.id] || "",
+    ]),
+  );
+
+/**
+ * What the report and dashboard tally per question. CC2 and CC3 can hold N/A
+ * because they may be skipped; CC1 cannot, so counting one for it would print
+ * a column that is always zero.
+ */
+export const ccTallyOptions = (question) =>
+  question.id === "cc1"
+    ? question.options
+    : question.options.concat([{ value: "N/A", en: "N/A", tl: "N/A" }]);
 
 /** SQD5 asks about fees, so it is only put to clients of a service that charges them. */
 export const SQD_FEES_ID = "sqd5";

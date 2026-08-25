@@ -18,9 +18,10 @@ import {
   OTHER_SERVICE_CODE,
   REGIONS,
   SEXES,
-  SQD_QUESTIONS,
   SQD_SCALE,
   portalToday,
+  sqdAnswers,
+  sqdApplicable,
   t,
 } from "../lib/csm";
 import { getPortalConfig, submitResponse } from "../lib/api";
@@ -106,7 +107,7 @@ function ChoiceGroup({ name, options, value, onChange, language, columns = 1 }) 
   );
 }
 
-function SqdRating({ question, index, value, onChange, language }) {
+function SqdRating({ question, value, onChange, language }) {
   return (
     <fieldset className="sqd-item">
       <legend>
@@ -130,7 +131,6 @@ function SqdRating({ question, index, value, onChange, language }) {
           </button>
         ))}
       </div>
-      <input type="hidden" name={`sqd-${index}`} value={value || ""} readOnly />
     </fieldset>
   );
 }
@@ -148,16 +148,17 @@ export function SurveyForm() {
     [turnstileToken, setTurnstileToken] = useState(""),
     [turnstileReset, setTurnstileReset] = useState(0);
 
+  const loadServices = () =>
+    getPortalConfig().then((config) => {
+      const list = (config.services || []).filter((s) => s.active !== false);
+      setServices(list);
+      return list;
+    });
+
   useEffect(() => {
-    getPortalConfig()
-      .then((config) =>
-        setServices(
-          (config.services || []).filter((s) => s.active !== false),
-        ),
-      )
-      .catch((loadError) =>
-        setError(loadError.message || "Unable to load the survey."),
-      );
+    loadServices().catch((loadError) =>
+      setError(loadError.message || "Unable to load the survey."),
+    );
   }, []);
 
   const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
@@ -196,9 +197,12 @@ export function SurveyForm() {
         (!form.age || (Number(form.age) >= 1 && Number(form.age) <= 120))
       );
     if (step === 2) return CC_QUESTIONS.every((question) => cc[question.id]);
-    if (step === 3) return SQD_QUESTIONS.every((question) => sqd[question.id]);
+    if (step === 3)
+      return sqdApplicable(selectedService).every((question) => sqd[question.id]);
     return true;
-  }, [step, form, cc, sqd, wantsCoa, isOtherService]);
+    // selectedService matters here: which SQD questions are required depends
+    // on it, and it resolves only once the service list has loaded.
+  }, [step, form, cc, sqd, wantsCoa, isOtherService, selectedService]);
 
   // Two clicks landing in the same tick share one render's closure, so both
   // would advance. Comparing against the step the click was made on makes the
@@ -243,16 +247,33 @@ export function SurveyForm() {
         ...Object.fromEntries(
           CC_QUESTIONS.map((question) => [question.id, cc[question.id] || ""]),
         ),
-        ...Object.fromEntries(
-          SQD_QUESTIONS.map((question) => [question.id, sqd[question.id] || ""]),
-        ),
+        ...sqdAnswers(sqd, selectedService),
       };
       const result = await submitResponse(
         { ...answers, submissionId: `${submissionId}-${fingerprint(answers)}` },
         turnstileToken,
       );
-      if (result.status === "BAD_REQUEST")
+      if (result.status === "BAD_REQUEST") {
+        // The office marked this service as charging a fee while the form was
+        // open, so SQD5 is now required but was never rendered. Telling the
+        // client to rate a fee they cannot see would strand them — every
+        // further Submit repeats the same refusal. Fetch the service list
+        // again and take them back to the question instead.
+        if (result.code === "SQD5_REQUIRED") {
+          await loadServices().catch(() => {});
+          setSqd((state) => ({ ...state, sqd5: "" }));
+          setStep(3);
+          setTurnstileToken("");
+          setTurnstileReset((value) => value + 1);
+          window.scrollTo({ top: 0 });
+          return setError(
+            language === "tl"
+              ? "May bagong tanong tungkol sa bayarin para sa serbisyong ito. Pakisagutan ito bago magsumite."
+              : "This service now asks about fees. Please answer the added question, then submit again.",
+          );
+        }
         throw new Error(result.message || "Please check your answers.");
+      }
       setDone(result);
       window.scrollTo({ top: 0 });
     } catch (submitError) {
@@ -665,8 +686,8 @@ export function SurveyForm() {
                         }
                         placeholder={
                           language === "tl"
-                            ? "hal. paghingi ng sertipikasyon"
-                            : "e.g. request for certification"
+                            ? "hal. pagtatanong tungkol sa Undergraduate Scholarships"
+                            : "e.g. inquiries regarding Undergraduate Scholarships"
                         }
                       />
                     </label>
@@ -729,11 +750,18 @@ export function SurveyForm() {
                     </span>
                   ))}
                 </div>
-                {SQD_QUESTIONS.map((question, index) => (
+                {!selectedService?.has_fees && (
+                  <div className="notice">
+                    <Info size={15} />
+                    {language === "tl"
+                      ? "Walang bayad ang serbisyong ito, kaya hindi na kasama ang tanong tungkol sa bayarin."
+                      : "This service carries no fee, so the question about fees is not asked."}
+                  </div>
+                )}
+                {sqdApplicable(selectedService).map((question) => (
                   <SqdRating
                     key={question.id}
                     question={question}
-                    index={index}
                     language={language}
                     value={sqd[question.id]}
                     onChange={(value) =>

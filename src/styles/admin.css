@@ -368,6 +368,15 @@ form.panel {
   font-size: 12px;
 }
 
+.field-note {
+  display: block;
+  margin: -6px 0 14px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 56ch;
+}
+
 .pager {
   display: flex;
   align-items: center;

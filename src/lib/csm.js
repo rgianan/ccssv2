@@ -265,10 +265,12 @@ export const SQD_QUESTIONS = [
 ];
 
 /**
- * The five-point Likert scale plus N/A, as prescribed by ARTA Memorandum
- * Circular No. 2023-05 (s. 2023). N/A covers dimensions that genuinely do not
- * apply to a transaction — SQD5 on a service that carries no fee, for example.
- * `numericScores_` in the backend excludes it from every mean and median.
+ * The five-point Likert scale of ARTA Memorandum Circular No. 2023-05
+ * (s. 2023). N/A is still a stored value and still appears in the report — the
+ * circular's reckoning is unchanged — but it is no longer offered as a button.
+ * A dimension that does not apply is not shown at all and is recorded as N/A
+ * automatically, which is both clearer for the client and better data than
+ * asking them to classify their own answer as inapplicable.
  */
 export const SQD_SCALE = [
   {
@@ -286,8 +288,31 @@ export const SQD_SCALE = [
   },
   { value: "4", emoji: "🙂", en: "Agree", tl: "Sumasang-ayon" },
   { value: "5", emoji: "😄", en: "Strongly Agree", tl: "Lubos na Sumasang-ayon" },
-  { value: "N/A", emoji: "—", en: "N/A", tl: "N/A" },
 ];
+
+/** SQD5 asks about fees, so it is only put to clients of a service that charges them. */
+export const SQD_FEES_ID = "sqd5";
+
+/** The dimensions to actually ask about, given the service being rated. */
+export const sqdApplicable = (service) =>
+  service?.has_fees
+    ? SQD_QUESTIONS
+    : SQD_QUESTIONS.filter((question) => question.id !== SQD_FEES_ID);
+
+/**
+ * The full set of nine, with anything that did not apply recorded as N/A.
+ * The backend decides this too and does not trust what arrives here, but
+ * sending the same thing keeps the payload honest about what was asked.
+ */
+export const sqdAnswers = (sqd, service) =>
+  Object.fromEntries(
+    SQD_QUESTIONS.map((question) => [
+      question.id,
+      question.id === SQD_FEES_ID && !service?.has_fees
+        ? "N/A"
+        : sqd[question.id] || "",
+    ]),
+  );
 
 export const COURTESY_TITLES = ["Mr.", "Ms.", "Mrs.", "Dr.", "Engr.", "Atty."];
 

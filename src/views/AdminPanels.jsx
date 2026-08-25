@@ -624,6 +624,7 @@ const blankService = {
   name_tl: "",
   category: "main",
   active: true,
+  has_fees: false,
   sort_order: "",
 };
 
@@ -749,6 +750,22 @@ export function ServicesPanel({ onError }) {
           />{" "}
           Offered on the client form
         </label>
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={form.has_fees}
+            onChange={(event) =>
+              setForm({ ...form, has_fees: event.target.checked })
+            }
+          />{" "}
+          This program charges a fee
+        </label>
+        <small className="field-note">
+          Only programs that charge a fee are asked SQD5 — “I paid a reasonable
+          amount of fees for my transaction.” Everyone else is recorded as N/A,
+          which the report excludes from every average rather than counting as
+          zero.
+        </small>
         <button className="button primary" disabled={saving}>
           {saving ? "Saving…" : form.service_id ? "Update program" : "Add program"}
         </button>
@@ -780,6 +797,7 @@ export function ServicesPanel({ onError }) {
                   </td>
                   <td>
                     {service.category === "main" ? "Main program" : "Other"}
+                    {service.has_fees && <small>Charges a fee</small>}
                   </td>
                   <td>
                     <span
@@ -792,7 +810,11 @@ export function ServicesPanel({ onError }) {
                     <button
                       className="mini-button"
                       onClick={() =>
-                        setForm({ ...service, sort_order: service.sort_order ?? "" })
+                        setForm({
+                          ...service,
+                          has_fees: service.has_fees === true,
+                          sort_order: service.sort_order ?? "",
+                        })
                       }
                       title={`Edit ${service.code}`}
                     >

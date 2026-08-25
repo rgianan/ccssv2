@@ -20,6 +20,26 @@ var SHEET_AUDIT = 'Audit';
 
 var SQD_KEYS = ['sqd0','sqd1','sqd2','sqd3','sqd4','sqd5','sqd6','sqd7','sqd8'];
 var CC_KEYS = ['cc1','cc2','cc3'];
+
+/**
+ * What each Citizen's Charter question may hold. These must stay in step with
+ * CC_QUESTIONS in src/lib/csm.js and CC_LABELS_ in Report.gs: the report gives
+ * every question a column per numbered choice plus one for N/A, so a value
+ * accepted here but absent there is stored, dropped from the table, and still
+ * counted in the Total — leaving a row that does not add up.
+ *
+ * CC2 therefore stops accepting '5' and CC3 stops accepting '4' and '5'; in
+ * the circular those positions are N/A, which is listed separately.
+ */
+var CC_OPTIONS_ = {
+  cc1: ['1','2','3','4','N/A'],
+  cc2: ['1','2','3','4','N/A'],
+  cc3: ['1','2','3','N/A']
+};
+
+var SQD_OPTIONS_ = ['1','2','3','4','5','N/A'];
+/** Where a fee is charged every client pays one, so there is no N/A to give. */
+var SQD_RATED_OPTIONS_ = ['1','2','3','4','5'];
 var PUBLIC_CACHE_SECONDS = 900;
 
 // --------------------------------- Entry -------------------------------------
@@ -330,7 +350,7 @@ function setupCsmSheets() {
     var responses = ensureSetupSheet_(ss, SHEET_RESPONSES, responseColumns_());
     var services = ensureSetupSheet_(ss, SHEET_SERVICES, [
       setupColumn_('service_id'), setupColumn_('code'), setupColumn_('name_en'), setupColumn_('name_tl'),
-      setupColumn_('category'), setupColumn_('active'), setupColumn_('sort_order'),
+      setupColumn_('category'), setupColumn_('active'), setupColumn_('has_fees'), setupColumn_('sort_order'),
       setupColumn_('created_at'), setupColumn_('updated_at')
     ]);
     var stats = ensureSetupSheet_(ss, SHEET_SERVICE_STATS, [
@@ -384,7 +404,7 @@ function setupCsmSheets() {
 }
 
 var DEFAULT_SERVICES_ = [
-  { code: 'CEM/CED', name_en: 'Application for Certification of Eligibility for Admission to Medical/Dental Program (CEM/CED)', name_tl: 'Aplikasyon para sa Certification of Eligibility for Admission to Medical/Dental Program (CEM/CED)', category: 'main' },
+  { code: 'CEM/CED', name_en: 'Application for Certification of Eligibility for Admission to Medical/Dental Program (CEM/CED)', name_tl: 'Aplikasyon para sa Certification of Eligibility for Admission to Medical/Dental Program (CEM/CED)', category: 'main', has_fees: true },
   { code: 'SIAP 1', name_en: 'Application for Student Internship Program (SIAP) Phase 1', name_tl: 'Aplikasyon para sa Student Internship Program (SIAP) Phase 1', category: 'main' },
   { code: 'SIAP 2', name_en: 'Application for Student Internship Program (SIAP) Phase 2', name_tl: 'Aplikasyon para sa Student Internship Program (SIAP) Phase 2', category: 'main' },
   { code: 'BI INDORSEMENT', name_en: 'Request for Endorsement for Conversion/Extension of Visa of Foreign Students to the Bureau of Immigration', name_tl: 'Kahilingan para sa Endorsement para sa Conversion/Extension ng Visa ng mga Dayuhang Estudyante sa Bureau of Immigration', category: 'main' },
@@ -420,12 +440,15 @@ function seedServices_(sheet) {
     row[hdr['name_tl']] = safeSheetValue_(service.name_tl);
     row[hdr['category']] = service.category;
     row[hdr['active']] = true;
+    row[hdr['has_fees']] = service.has_fees === true;
     row[hdr['sort_order']] = (index + 1) * 10;
     row[hdr['created_at']] = now;
     row[hdr['updated_at']] = now;
     sheet.appendRow(row);
     added.push(service.code);
   });
+
+  backfillServiceFees_(sheet);
   // The public list is cached for 15 minutes; without this the restored
   // programs would not show up on the portal until it expired.
   if (added.length) invalidatePublicCache_();
@@ -510,12 +533,65 @@ function writeSettings_(values) {
 
 // -------------------------------- Services -----------------------------------
 
+/**
+ * Fills in the fees flag for any program still missing one, using the defaults
+ * that ship with the portal.
+ *
+ * A blank cell and a deliberate "no" are the same value once read, so the gap
+ * between adding the column and filling it was dangerous: readServices_ maps
+ * blank to false, the Programs form shows the box unticked, and the first save
+ * writes that guess back as a decision — which then looks like an answer worth
+ * preserving and leaves the real default stranded. Filling the column the
+ * moment it appears means that gap never exists. Blank cells only.
+ */
+function backfillServiceFees_(sheet) {
+  // Whichever request first touches the Services sheet runs this, and that is
+  // as likely to be a client pressing Submit as an administrator opening the
+  // Programs page. So it must be cheap — one read and one write rather than a
+  // write per row — and it must never be able to fail the request that
+  // happened to trigger it. A failure here leaves the cells blank, and the
+  // next call simply tries again.
+  try {
+    var hdr = getHeaderMap_(sheet);
+    var feeCol = idxOf_(hdr, ['has_fees']), codeCol = idxOf_(hdr, ['code']);
+    if (feeCol < 0 || codeCol < 0 || sheet.getLastRow() < 2) return 0;
+
+    var charges = {};
+    DEFAULT_SERVICES_.forEach(function (service) {
+      if (service.has_fees) charges[service.code.toUpperCase()] = true;
+    });
+
+    var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+    var column = [], filled = 0;
+    rows.forEach(function (row) {
+      if (safeTrim_(row[feeCol]) !== '') {          // already answered
+        column.push([row[feeCol]]);
+        return;
+      }
+      column.push([charges[safeTrim_(row[codeCol]).toUpperCase()] === true]);
+      filled++;
+    });
+    if (!filled) return 0;
+
+    sheet.getRange(2, feeCol + 1, column.length, 1).setValues(column);
+    invalidatePublicCache_();
+    return filled;
+  } catch (error) {
+    console.error('has_fees backfill skipped: ' + String(error && error.message || error));
+    return 0;
+  }
+}
+
 function ensureServicesSheet_() {
-  return ensureSetupSheet_(SpreadsheetApp.getActiveSpreadsheet(), SHEET_SERVICES, [
+  var setup = ensureSetupSheet_(SpreadsheetApp.getActiveSpreadsheet(), SHEET_SERVICES, [
     setupColumn_('service_id'), setupColumn_('code'), setupColumn_('name_en'), setupColumn_('name_tl'),
-    setupColumn_('category'), setupColumn_('active'), setupColumn_('sort_order'),
+    setupColumn_('category'), setupColumn_('active'), setupColumn_('has_fees'), setupColumn_('sort_order'),
     setupColumn_('created_at'), setupColumn_('updated_at')
-  ]).sheet;
+  ]);
+  // Whichever request first brings the column into being also populates it, so
+  // no caller ever sees the column blank — not even the one that created it.
+  if (setup.headersAdded.indexOf('has_fees') >= 0) backfillServiceFees_(setup.sheet);
+  return setup.sheet;
 }
 
 function readServices_() {
@@ -532,6 +608,8 @@ function readServices_() {
         name_tl: safeTrim_(row[hdr['name_tl']]),
         category: safeTrim_(row[hdr['category']]).toLowerCase() || 'main',
         active: String(row[hdr['active']]).toLowerCase() !== 'false',
+        // Opt-in, so a service only asks about fees when someone says it charges them.
+        has_fees: String(row[hdr['has_fees']]).toLowerCase() === 'true',
         sort_order: Number(row[hdr['sort_order']]) || 0
       };
     })
@@ -575,12 +653,22 @@ function adminSaveService(payload, adminToken) {
       ? (current ? current.sort_order : (existing.length + 1) * 10)
       : Number(payload.sort_order) || 0;
 
+    // An update that does not mention the flag leaves it as it was, the way
+    // sort_order above already behaves. Reading a missing field as false would
+    // let a partial payload — an admin page still running the previous bundle,
+    // say — quietly stop a fee-charging program from asking about fees, with
+    // nothing on screen to show it happened.
+    var hasFees = 'has_fees' in payload
+      ? (payload.has_fees === true || String(payload.has_fees).toLowerCase() === 'true')
+      : (current ? current.has_fees === true : false);
+
     values[hdr['service_id']] = serviceId;
     values[hdr['code']] = safeSheetValue_(code);
     values[hdr['name_en']] = safeSheetValue_(nameEn);
     values[hdr['name_tl']] = safeSheetValue_(nameTl);
     values[hdr['category']] = category;
     values[hdr['active']] = active;
+    values[hdr['has_fees']] = hasFees;
     values[hdr['sort_order']] = sortOrder;
     if (!current) values[hdr['created_at']] = new Date();
     values[hdr['updated_at']] = new Date();
@@ -604,7 +692,7 @@ function getPortalConfig() {
         return {
           service_id: service.service_id, code: service.code,
           name_en: service.name_en, name_tl: service.name_tl,
-          category: service.category, active: true
+          category: service.category, active: true, has_fees: service.has_fees
         };
       })
   };
@@ -713,12 +801,45 @@ function submitResponse(formData) {
   if (age && (!/^\d{1,3}$/.test(age) || Number(age) < 1 || Number(age) > 120))
     return { status: 'BAD_REQUEST', message: 'Age must be between 1 and 120.' };
 
+  // Each question is checked against the choices it actually offers, so a
+  // value the report has no column for cannot be stored.
   for (var c = 0; c < CC_KEYS.length; c++)
-    if (['1','2','3','4','5','N/A'].indexOf(safeTrim_(formData[CC_KEYS[c]])) < 0)
+    if (CC_OPTIONS_[CC_KEYS[c]].indexOf(safeTrim_(formData[CC_KEYS[c]])) < 0)
       return { status: 'BAD_REQUEST', message: 'Please answer all Citizen’s Charter questions.' };
-  for (var s = 0; s < SQD_KEYS.length; s++)
-    if (['1','2','3','4','5','N/A'].indexOf(safeTrim_(formData[SQD_KEYS[s]])) < 0)
-      return { status: 'BAD_REQUEST', message: 'Please answer all Service Quality Dimension questions.' };
+
+  // SQD5 asks about fees, so it is only put to clients of a service that
+  // charges them. Everyone else is recorded as N/A, decided here rather than
+  // taken on trust from the browser — the form can be bypassed, and a rating
+  // for a fee nobody paid would quietly distort the filed average.
+  var sqdAnswers = {};
+  SQD_KEYS.forEach(function (key) { sqdAnswers[key] = safeTrim_(formData[key]); });
+  if (!service.has_fees) sqdAnswers.sqd5 = 'N/A';
+
+  for (var s = 0; s < SQD_KEYS.length; s++) {
+    var sqdKey = SQD_KEYS[s];
+    // Every client of a fee-charging service pays, so N/A is not an answer
+    // there — accepting one would drop the response out of the Costs average
+    // without anything to show it had been dropped.
+    var allowed = sqdKey === 'sqd5' && service.has_fees
+      ? SQD_RATED_OPTIONS_
+      : SQD_OPTIONS_;
+    if (allowed.indexOf(sqdAnswers[sqdKey]) < 0) {
+      // A form rendered before this service was marked as charging a fee has
+      // no control to satisfy this, so the client cannot act on a plain error
+      // message. The code lets the browser refresh its copy of the service
+      // list and put the question in front of them instead.
+      if (sqdKey === 'sqd5' && service.has_fees)
+        return {
+          status: 'BAD_REQUEST',
+          code: 'SQD5_REQUIRED',
+          message: 'Please rate the fees you paid for this transaction.'
+        };
+      return {
+        status: 'BAD_REQUEST',
+        message: 'Please answer all Service Quality Dimension questions.'
+      };
+    }
+  }
 
   var wantsCoa = safeTrim_(formData.wantsCoa).toLowerCase() === 'yes';
   var coaName = safeTrim_(formData.coaName).slice(0, 160);
@@ -768,7 +889,7 @@ function submitResponse(formData) {
     put(['servicename'], service.name_en);
     put(['otherservice'], otherService);
     CC_KEYS.forEach(function (key) { put([key], safeTrim_(formData[key])); });
-    SQD_KEYS.forEach(function (key) { put([key], safeTrim_(formData[key])); });
+    SQD_KEYS.forEach(function (key) { put([key], sqdAnswers[key]); });
     put(['suggestions'], safeTrim_(formData.suggestions).slice(0, 1500));
     put(['email'], email);
     put(['language'], safeTrim_(formData.language) || 'en');

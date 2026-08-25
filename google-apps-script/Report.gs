@@ -41,15 +41,60 @@ var SQD_DIMENSIONS_ = [
     tl: 'Nakuha ko ang klase ng serbisyo na kailangan ko mula sa tanggapang ito, o (kung tinanggihan) sapat na naipaliwanag sa akin ang dahilan.' }
 ];
 
+/**
+ * The numbered choices each question actually offers, which must match
+ * CC_QUESTIONS in src/lib/csm.js — the form cannot produce a number that is
+ * not listed there, so any extra one here prints a column of permanent zeros.
+ *
+ * N/A is deliberately absent: every question gets its own N/A column below,
+ * built separately. Listing it here as well as there is what previously gave
+ * CC2 a phantom "Opt 5" and CC3 a phantom "Opt 4" — in ARTA Memorandum
+ * Circular No. 2023-05 those positions *are* N/A, so they were being counted
+ * once as a numbered option nobody could pick and again as N/A. A reviewer
+ * reading "Opt 5: 0" would take it to mean nobody chose option 5.
+ */
 var CC_LABELS_ = {
   cc1: { text: 'CC1. Which of the following best describes your awareness of the CC?', options: ['1','2','3','4'] },
-  cc2: { text: 'CC2. If aware of CC (answered 1-3 in CC1), would you say that the CC of this office was…', options: ['1','2','3','4','5'] },
-  cc3: { text: 'CC3. If aware of CC (answered 1-3 in CC1), how much did the CC help you in your transaction?', options: ['1','2','3','4'] }
+  cc2: { text: 'CC2. If aware of CC (answered 1-3 in CC1), would you say that the CC of this office was…', options: ['1','2','3','4'] },
+  cc3: { text: 'CC3. If aware of CC (answered 1-3 in CC1), how much did the CC help you in your transaction?', options: ['1','2','3'] }
 };
 
 var REGION_ORDER_ = ['I','II','III','IV-A','IV-B','V','VI','VII','VIII','IX','X','XI','XII','NCR','CAR','CARAGA','BARMM','NIR'];
 
 var REPORTS_FOLDER_SETTING = 'report_folder_id';
+
+/**
+ * A dimension with no ratings behind it is not a zero — it is a question that
+ * did not apply. SQD5 asks about fees, and only some services charge any, so
+ * every other service now records N/A there by design. Printing 0.00 would
+ * read as the worst possible score and would drag any average it entered.
+ *
+ * The overall figures are unaffected either way: numericScores_ keeps only
+ * 1-5, so an N/A contributes to no mean, median or overall score. It is
+ * excluded from the reckoning rather than counted as nothing.
+ */
+function dimensionStat_(values, statistic) {
+  return numericScores_(values).length ? round2_(statistic(values)) : 'N/A';
+}
+
+/**
+ * The Overall Score cell, built from the same rule as the dimension cells
+ * beside it so the row cannot contradict itself.
+ *
+ * reportRows carries every configured programme, including ones nobody used
+ * this period. overallScore_ returns a rounded zero for an empty set, which
+ * printed N/A across the dimensions and then 0.00 for the overall — the worst
+ * possible score, for a programme that simply had no respondents. overallScore_
+ * itself has to keep returning a number, because adminGetOverview relies on the
+ * zero to render an em dash on the dashboard.
+ */
+function overallStat_(records) {
+  var values = [];
+  records.forEach(function (record) {
+    SQD_KEYS.forEach(function (key) { values.push(record[key]); });
+  });
+  return dimensionStat_(values, meanOf_);
+}
 
 // SQD block on the CSM Summary sheet: column C starts a mean/median pair per SQD.
 var SQD_FIRST_COLUMN_ = 3;
@@ -140,10 +185,44 @@ function shareReportWithAdmins_(file, actorEmail) {
     : '';
 }
 
+/**
+ * Applies the office's standing position on fees to every response in the
+ * report, whenever it was collected.
+ *
+ * The survey used to ask SQD5 of everyone, so responses recorded before the
+ * fees flag existed carry a Costs rating even for programmes that charge
+ * nothing. Left alone, a report spanning that change would compute Costs for a
+ * fee-free programme from only its earlier respondents — a partial sample
+ * presented as a finished figure — and the column would shift partway through
+ * the period with nothing to mark it.
+ *
+ * Reading those ratings as N/A gives every period the same answer: Costs is
+ * reported for the programmes that charge a fee and reads N/A for the rest.
+ * The Responses sheet is untouched; this is how the report interprets it.
+ */
+function applyFeePolicy_(records, services) {
+  var charges = {};
+  services.forEach(function (service) {
+    if (service.has_fees) charges[service.service_id] = true;
+  });
+  return records.map(function (record) {
+    if (charges[record.serviceId] || record.sqd5 === 'N/A') return record;
+    var copy = {};
+    Object.keys(record).forEach(function (key) { copy[key] = record[key]; });
+    copy.sqd5 = 'N/A';
+    // overall is derived from the SQD answers, so it has to be recomputed.
+    copy.overall = meanOf_(SQD_KEYS.map(function (key) { return copy[key]; }));
+    return copy;
+  });
+}
+
 function buildReport_(period, actorEmail, folder) {
   var settings = readSettings_();
   var services = readServices_();
-  var records = readResponses_().rows.filter(function (record) { return inPeriod_(record, period); });
+  var records = applyFeePolicy_(
+    readResponses_().rows.filter(function (record) { return inPeriod_(record, period); }),
+    services,
+  );
   if (!records.length)
     throw new Error('There are no responses for ' + period.label + ' yet.');
 
@@ -365,20 +444,14 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
     return value === '' || value == null ? '' : Number(value);
   };
   var dataRow = firstDataRow;
-  var meanMatrix = [], medianMatrix = [];
   reportRows.forEach(function (entry, index) {
-    var means = [], medians = [], pairs = [];
+    var pairs = [];
     SQD_DIMENSIONS_.forEach(function (dimension) {
-      var values = entry.records.map(function (record) { return record[dimension.key]; });
-      var mean = round2_(meanOf_(values)), median = round2_(medianOf_(values));
-      means.push(mean);
-      medians.push(median);
-      pairs.push(mean, median);
+      var scores = entry.records.map(function (record) { return record[dimension.key]; });
+      pairs.push(dimensionStat_(scores, meanOf_), dimensionStat_(scores, medianOf_));
     });
-    meanMatrix.push(means);
-    medianMatrix.push(medians);
     var values = [index + 1, safeSheetValue_(entry.name)].concat(pairs).concat([
-      overallScore_(entry.records),
+      overallStat_(entry.records),
       entry.records.length,
       countOrBlank(entry.stat.clients),
       countOrBlank(entry.stat.transactions),
@@ -394,18 +467,22 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
 
   var totalRow = dataRow;
   var totals = ['', 'OVERALL RATING'];
-  SQD_DIMENSIONS_.forEach(function (dimension, dimensionIndex) {
-    var columnMeans = meanMatrix.map(function (means) { return means[dimensionIndex]; }).filter(function (value) { return value > 0; });
-    var columnMedians = medianMatrix.map(function (medians) { return medians[dimensionIndex]; }).filter(function (value) { return value > 0; });
-    totals.push(
-      columnMeans.length ? round2_(columnMeans.reduce(function (a, b) { return a + b; }, 0) / columnMeans.length) : 0,
-      columnMedians.length ? round2_(medianOf_(columnMedians)) : 0
-    );
+  // Every figure in this row is drawn from the individual answers, exactly as
+  // the per-program rows above are — this row simply covers all of them.
+  //
+  // It used to average the per-program means instead, which weighted a program
+  // with two respondents the same as one with two hundred, and left the row
+  // disagreeing with its own Overall Score cell (that one was already pooled).
+  // A reader checking the row against itself found two figures that could not
+  // both be right.
+  SQD_DIMENSIONS_.forEach(function (dimension) {
+    var values = records.map(function (record) { return record[dimension.key]; });
+    totals.push(dimensionStat_(values, meanOf_), dimensionStat_(values, medianOf_));
   });
   totals.push(
     // Every respondent counts once, so a program with two respondents no
     // longer moves this figure as far as one with two hundred.
-    overallScore_(records),
+    overallStat_(records),
     records.length,
     reportRows.reduce(function (sum, entry) { return sum + (Number(entry.stat.clients) || 0); }, 0),
     reportRows.reduce(function (sum, entry) { return sum + (Number(entry.stat.transactions) || 0); }, 0),
@@ -504,8 +581,8 @@ function buildServiceSheet_(ss, period, settings, service, records) {
   var meanValues = [], medianValues = [];
   SQD_DIMENSIONS_.forEach(function (dimension) {
     var values = records.map(function (record) { return record[dimension.key]; });
-    meanValues.push(round2_(meanOf_(values)));
-    medianValues.push(round2_(medianOf_(values)));
+    meanValues.push(dimensionStat_(values, meanOf_));
+    medianValues.push(dimensionStat_(values, medianOf_));
   });
   sheet.getRange(meanRow, 2, 2, SQD_DIMENSIONS_.length)
     .setValues([meanValues, medianValues])

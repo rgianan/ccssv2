@@ -33,7 +33,12 @@ export function Skeleton({ width, height = 14, radius = 6, style, ...rest }) {
  */
 export function SkeletonRegion({ label, children, className = "" }) {
   return (
-    <div className={className} role="status" aria-live="polite" aria-busy="true">
+    <div
+      className={className}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
       <span className="visually-hidden">{label}</span>
       {children}
     </div>
@@ -124,7 +129,9 @@ export class PanelBoundary extends React.Component {
             </p>
           </div>
         </div>
-        <p className="alert">{String(this.state.error?.message || this.state.error)}</p>
+        <p className="alert">
+          {String(this.state.error?.message || this.state.error)}
+        </p>
       </section>
     );
   }
@@ -140,6 +147,11 @@ export class PanelBoundary extends React.Component {
  *
  * The wrapper is inline-flex by default because most triggers are buttons in a
  * row; pass `block` for a trigger that has to keep filling its container.
+ *
+ * `className` puts a layout class on the wrapper rather than on the trigger.
+ * The wrapper is what the parent lays out now, so a class like `push-right`
+ * left on the trigger stops doing anything — it would be positioning a box
+ * inside the box that actually moves.
  */
 export function Tip({
   text,
@@ -147,12 +159,13 @@ export function Tip({
   placement = "top",
   align = "center",
   block = false,
+  className = "",
 }) {
   const id = useId();
   if (!text) return children;
   return (
     <span
-      className={`tip tip-${placement} tip-align-${align}${block ? " tip-block" : ""}`}
+      className={`tip tip-${placement} tip-align-${align}${block ? " tip-block" : ""}${className ? " " + className : ""}`}
     >
       {React.cloneElement(React.Children.only(children), {
         "aria-describedby": id,

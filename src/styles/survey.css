@@ -195,8 +195,22 @@
   border-color: var(--blue);
   border-width: 5px;
 }
+/* The real radio is visually hidden, so its focus ring has to be drawn on the
+   label. `:focus-within` is the only way to do that without `:has()`, but it
+   also fires for a mouse click — which left a ring glowing on whichever option
+   was last clicked, long after the pointer had moved on. Where `:has()` is
+   available the ring is narrowed to keyboard focus; where it is not, the
+   redundant-but-visible ring is the safer failure. */
 .choice:focus-within {
   box-shadow: 0 0 0 3px rgba(0, 50, 160, 0.15);
+}
+@supports selector(:has(*)) {
+  .choice:focus-within {
+    box-shadow: none;
+  }
+  .choice:has(:focus-visible) {
+    box-shadow: 0 0 0 3px rgba(0, 50, 160, 0.15);
+  }
 }
 .other-service {
   margin: 12px 0 0;
@@ -276,11 +290,6 @@
 .sqd-option:hover {
   border-color: #a7c0db;
 }
-/* The radio itself is invisible, so the ring has to live on the label or a
-   keyboard user cannot see where they are. */
-.sqd-option:focus-within {
-  box-shadow: 0 0 0 3px rgba(0, 50, 160, 0.15);
-}
 .sqd-emoji {
   display: block;
   font-size: 20px;
@@ -302,6 +311,40 @@
   border-color: var(--blue);
   color: #fff;
   box-shadow: 0 6px 14px rgba(0, 50, 160, 0.18);
+}
+
+/* Placed after .selected, deliberately. Both carry a box-shadow at the same
+   specificity, so whichever comes last wins outright — and with .selected
+   last, a keyboard user focusing the option that is already chosen, which in a
+   radio group is the usual case, saw no focus indicator at all. Ordering these
+   after it, and restating the selected lift alongside the ring, keeps focus
+   visible without flattening the chosen tile.
+
+   As on .choice: :has() narrows the ring to keyboard focus, and the plain
+   :focus-within rule stays as the fallback where :has() is unsupported. */
+.sqd-option:focus-within {
+  box-shadow: 0 0 0 3px rgba(0, 50, 160, 0.15);
+}
+.sqd-option.selected:focus-within {
+  box-shadow:
+    0 6px 14px rgba(0, 50, 160, 0.18),
+    0 0 0 3px rgba(0, 50, 160, 0.4);
+}
+@supports selector(:has(*)) {
+  .sqd-option:focus-within {
+    box-shadow: none;
+  }
+  .sqd-option.selected:focus-within {
+    box-shadow: 0 6px 14px rgba(0, 50, 160, 0.18);
+  }
+  .sqd-option:has(:focus-visible) {
+    box-shadow: 0 0 0 3px rgba(0, 50, 160, 0.15);
+  }
+  .sqd-option.selected:has(:focus-visible) {
+    box-shadow:
+      0 6px 14px rgba(0, 50, 160, 0.18),
+      0 0 0 3px rgba(0, 50, 160, 0.4);
+  }
 }
 
 .coa-fields {

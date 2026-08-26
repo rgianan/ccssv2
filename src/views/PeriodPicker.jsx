@@ -1,6 +1,7 @@
 import React from "react";
 import { CalendarRange, ChevronDown } from "lucide-react";
 import { QUARTERS, portalPeriodNow } from "../lib/csm";
+import { Tip } from "./ui";
 
 // The reporting period follows the office's calendar, not the browser's, so an
 // administrator abroad still lands on the quarter the backend is filing.
@@ -17,51 +18,60 @@ export function PeriodPicker({ period, onChange }) {
   return (
     <div className="period-picker">
       <CalendarRange size={16} />
-      <div className="select-wrap compact">
-        <select
-          value={period.type}
-          onChange={(event) => onChange({ ...period, type: event.target.value })}
-          title="Report by quarter or for the whole year"
-        >
-          <option value="quarter">By quarter</option>
-          <option value="year">By year</option>
-        </select>
-        <ChevronDown />
-      </div>
-      {period.type === "quarter" && (
+      <Tip
+        placement="bottom"
+        align="start"
+        text="File by quarter, or roll the whole calendar year into one report"
+      >
         <div className="select-wrap compact">
           <select
-            value={period.quarter}
+            value={period.type}
             onChange={(event) =>
-              onChange({ ...period, quarter: event.target.value })
+              onChange({ ...period, type: event.target.value })
             }
-            title="Select the quarter"
           >
-            {QUARTERS.map((quarter) => (
-              <option key={quarter.value} value={quarter.value}>
-                {quarter.label}
+            <option value="quarter">By quarter</option>
+            <option value="year">By year</option>
+          </select>
+          <ChevronDown />
+        </div>
+      </Tip>
+      {period.type === "quarter" && (
+        <Tip placement="bottom" text="Which quarter the figures cover">
+          <div className="select-wrap compact">
+            <select
+              value={period.quarter}
+              onChange={(event) =>
+                onChange({ ...period, quarter: event.target.value })
+              }
+            >
+              {QUARTERS.map((quarter) => (
+                <option key={quarter.value} value={quarter.value}>
+                  {quarter.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown />
+          </div>
+        </Tip>
+      )}
+      <Tip placement="bottom" align="end" text="Reporting year">
+        <div className="select-wrap compact">
+          <select
+            value={period.year}
+            onChange={(event) =>
+              onChange({ ...period, year: Number(event.target.value) })
+            }
+          >
+            {years.map((year) => (
+              <option key={year} value={year}>
+                {year}
               </option>
             ))}
           </select>
           <ChevronDown />
         </div>
-      )}
-      <div className="select-wrap compact">
-        <select
-          value={period.year}
-          onChange={(event) =>
-            onChange({ ...period, year: Number(event.target.value) })
-          }
-          title="Select the year"
-        >
-          {years.map((year) => (
-            <option key={year} value={year}>
-              {year}
-            </option>
-          ))}
-        </select>
-        <ChevronDown />
-      </div>
+      </Tip>
     </div>
   );
 }

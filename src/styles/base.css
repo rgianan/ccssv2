@@ -240,10 +240,23 @@ code {
   left: 14px;
   margin-left: 0;
 }
-/* Focus as well as hover, so the tip is reachable by keyboard rather than
-   being mouse-only the way `title` effectively is. */
-.tip:hover .tip-bubble,
-.tip:focus-within .tip-bubble {
+/* Hover, plus keyboard focus so the tip is reachable without a mouse — but
+   `:focus-visible`, not `:focus-within`. Clicking a button leaves it focused,
+   so `:focus-within` kept the bubble on screen after the click that navigated
+   away from it: the tip hung over the page until something else took focus.
+   `:focus-visible` is set for keyboard focus and not for a mouse click, which
+   is exactly the distinction wanted here. */
+.tip:hover .tip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(var(--tip-x), 0);
+}
+/* Its own rule, not a second selector on the one above. A browser without
+   `:has()` throws away an entire selector list containing one it cannot parse,
+   which would have taken the hover case with it and left the tooltips dead
+   everywhere. Alone, it simply does nothing on those browsers and the tips
+   stay hover-only — the same reach `title` had. */
+.tip:has(:focus-visible) .tip-bubble {
   opacity: 1;
   visibility: visible;
   transform: translate(var(--tip-x), 0);

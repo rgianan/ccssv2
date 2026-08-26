@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, BadgeCheck, ExternalLink, X } from "lucide-react";
+import { ArrowLeft, BadgeCheck, X } from "lucide-react";
 import { verifyCertificate } from "../lib/api";
 import { Brand } from "./shared";
+import { Tip } from "./ui";
 import { navigate } from "../router";
 
 export function VerificationPage() {
@@ -16,7 +17,9 @@ export function VerificationPage() {
     event?.preventDefault();
     const normalized = submitted.trim().toUpperCase();
     if (!normalized)
-      return setError("Enter the verification code printed on the certificate.");
+      return setError(
+        "Enter the verification code printed on the certificate.",
+      );
     setBusy(true);
     setError("");
     setResult(null);
@@ -37,17 +40,22 @@ export function VerificationPage() {
     <div className="verification-page">
       <header className="topbar">
         <Brand />
-        <a
-          className="topbar-link"
-          href="/"
-          onClick={(event) => {
-            event.preventDefault();
-            navigate("/");
-          }}
-          title="Return to the portal home page"
+        <Tip
+          align="end"
+          placement="bottom"
+          text="Return to the portal home page"
         >
-          <ArrowLeft size={17} /> Home
-        </a>
+          <a
+            className="topbar-link"
+            href="/"
+            onClick={(event) => {
+              event.preventDefault();
+              navigate("/");
+            }}
+          >
+            <ArrowLeft size={17} /> Home
+          </a>
+        </Tip>
       </header>
       <main className="verification-shell">
         <section className="verification-intro">
@@ -71,13 +79,17 @@ export function VerificationPage() {
               autoComplete="off"
             />
           </label>
-          <button
-            className="button primary"
-            disabled={busy}
-            title="Check this certificate against the issuance registry"
+          {/* `block`: this button is full-width inside the card, and an
+              inline-flex wrapper collapsed it to its text. */}
+          <Tip
+            block
+            text="Check this code against the office's issuance register"
           >
-            <BadgeCheck size={18} /> {busy ? "Checking…" : "Verify certificate"}
-          </button>
+            <button className="button primary" disabled={busy}>
+              <BadgeCheck size={18} />{" "}
+              {busy ? "Checking…" : "Verify certificate"}
+            </button>
+          </Tip>
           {error && <div className="alert">{error}</div>}
           {result &&
             (result.valid ? (
@@ -108,16 +120,10 @@ export function VerificationPage() {
                       <dd>{result.verificationCode}</dd>
                     </div>
                   </dl>
-                  {result.certificateUrl && (
-                    <a
-                      href={result.certificateUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Open the registered certificate PDF"
-                    >
-                      View registered PDF <ExternalLink size={15} />
-                    </a>
-                  )}
+                  {/* No link to the stored PDF: it lives in the office's Drive
+                      and shows "Request access" to anyone outside CHED, which
+                      is a dead end on the one page meant to reassure a
+                      stranger. The details above are the verification. */}
                 </div>
               </article>
             ) : (

@@ -423,7 +423,10 @@ form.panel {
   align-items: center;
   flex-wrap: wrap;
 }
-.filter-bar > button {
+/* Descendant, not direct-child: each filter button is wrapped in a tooltip, so
+   `>` stopped matching and the pills lost their styling entirely. The mini
+   buttons in this bar (Refresh) keep their own look and are excluded. */
+.filter-bar button:not(.mini-button) {
   border: 1px solid var(--border);
   background: #fff;
   border-radius: 999px;
@@ -432,7 +435,7 @@ form.panel {
   font-weight: 700;
   color: #576375;
 }
-.filter-bar > button.active {
+.filter-bar button:not(.mini-button).active {
   background: var(--blue);
   border-color: var(--blue);
   color: #fff;

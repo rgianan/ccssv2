@@ -231,19 +231,22 @@ function invalidatePublicCache_() {
 }
 
 /**
- * Publishes a file to anyone holding its link, and describes the failure
- * instead of hiding it: a Workspace policy that forbids link sharing would
- * otherwise leave a client with a certificate URL they cannot open and an
- * office register that calls it issued.
+ * Publishes a file to anyone holding its link.
+ *
+ * Returns a note when the Workspace forbids it, but no longer treats that as a
+ * problem for the client: the certificate travels as an email attachment, so a
+ * refused link costs only the convenience of opening it from Drive. The note
+ * says so, because an alarming message about a certificate that in fact
+ * arrived correctly sends an administrator chasing nothing.
  */
 function shareFileByLink_(file) {
   try {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     return '';
   } catch (error) {
-    return 'Link sharing was refused for this file (' +
-      String(error && error.message || error).slice(0, 160) +
-      '). Share it from Drive, or ask your Workspace administrator to allow link sharing.';
+    return 'This Workspace does not allow link sharing (' +
+      String(error && error.message || error).slice(0, 120) +
+      '), so no shareable link was created. The certificate itself was attached to the email.';
   }
 }
 

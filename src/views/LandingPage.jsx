@@ -14,6 +14,7 @@ import {
   Timer,
 } from "lucide-react";
 import { Brand, LanguageToggle } from "./shared";
+import { Tip } from "./ui";
 import { COPY, DEFAULT_SERVICES, SQD_SCALE, t } from "../lib/csm";
 import { getPortalConfig } from "../lib/api";
 import { navigate } from "../router";
@@ -23,7 +24,13 @@ const PROGRAM_ICONS = [Stethoscope, GraduationCap, ClipboardCheck, Plane];
 /** lucide dropped its brand icons, so the Facebook mark is inlined. */
 function FacebookMark() {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      width="17"
+      height="17"
+      aria-hidden="true"
+    >
       <path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.9h2.54V9.85c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.78-1.63 1.57v1.88h2.78l-.45 2.9h-2.33V22c4.78-.76 8.44-4.92 8.44-9.94Z" />
     </svg>
   );
@@ -83,8 +90,12 @@ function Header({ language, setLanguage }) {
     <header className="landing-nav">
       <Brand />
       <nav>
-        <a href="#programs">{language === "tl" ? "Mga Serbisyo" : "Services"}</a>
-        <a href="#how">{language === "tl" ? "Paano Ito Gumagana" : "How it works"}</a>
+        <a href="#programs">
+          {language === "tl" ? "Mga Serbisyo" : "Services"}
+        </a>
+        <a href="#how">
+          {language === "tl" ? "Paano Ito Gumagana" : "How it works"}
+        </a>
         <a
           href="/verification"
           onClick={(event) => {
@@ -97,14 +108,23 @@ function Header({ language, setLanguage }) {
       </nav>
       <div className="landing-nav-actions">
         <LanguageToggle language={language} onChange={setLanguage} />
-        <button
-          className="button primary"
-          onClick={() => navigate("/survey")}
-          title="Open the Client Satisfaction Measurement form"
+        <Tip
+          placement="bottom"
+          align="end"
+          text={
+            language === "tl"
+              ? "Buksan ang CSM form. Tumatagal ito ng 3–5 minuto."
+              : "Open the CSM form. It takes about 3–5 minutes."
+          }
         >
-          {language === "tl" ? "Sagutan ang Survey" : "Answer the survey"}
-          <ArrowRight size={17} />
-        </button>
+          <button
+            className="button primary"
+            onClick={() => navigate("/survey")}
+          >
+            {language === "tl" ? "Sagutan ang Survey" : "Answer the survey"}
+            <ArrowRight size={17} />
+          </button>
+        </Tip>
       </div>
     </header>
   );
@@ -118,7 +138,8 @@ export function LandingPage() {
       .then((config) =>
         setServices(
           (config.services || []).filter(
-            (service) => service.category === "main" && service.active !== false,
+            (service) =>
+              service.category === "main" && service.active !== false,
           ),
         ),
       )
@@ -140,8 +161,8 @@ export function LandingPage() {
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">
-            <ShieldCheck size={15} /> Republic of the Philippines · Commission on
-            Higher Education
+            <ShieldCheck size={15} /> Republic of the Philippines · Commission
+            on Higher Education
           </p>
           <h1>
             {language === "tl" ? (
@@ -160,24 +181,39 @@ export function LandingPage() {
           </h1>
           <p className="hero-lead">{t(COPY.intro, language)}</p>
           <div className="hero-actions">
-            <button
-              className="button primary large"
-              onClick={() => navigate("/survey")}
-              title="Start the Client Satisfaction Measurement survey"
+            <Tip
+              align="start"
+              text={
+                language === "tl"
+                  ? "Sagutan ang survey tungkol sa kakatapos mong transaksyon"
+                  : "Answer the survey about the transaction you just completed"
+              }
             >
-              {language === "tl" ? "Simulan ang Survey" : "Start the survey"}
-              <ArrowRight size={18} />
-            </button>
-            <button
-              className="button outline large"
-              onClick={() => navigate("/verification")}
-              title="Verify an issued Certificate of Appearance"
+              <button
+                className="button primary large"
+                onClick={() => navigate("/survey")}
+              >
+                {language === "tl" ? "Simulan ang Survey" : "Start the survey"}
+                <ArrowRight size={18} />
+              </button>
+            </Tip>
+            <Tip
+              text={
+                language === "tl"
+                  ? "Tingnan kung tunay ang isang naibigay nang Certificate of Appearance"
+                  : "Check that a Certificate of Appearance you were given is genuine"
+              }
             >
-              <BadgeCheck size={18} />
-              {language === "tl"
-                ? "Beripikahin ang Sertipiko"
-                : "Verify a certificate"}
-            </button>
+              <button
+                className="button outline large"
+                onClick={() => navigate("/verification")}
+              >
+                <BadgeCheck size={18} />
+                {language === "tl"
+                  ? "Beripikahin ang Sertipiko"
+                  : "Verify a certificate"}
+              </button>
+            </Tip>
           </div>
           <ul className="hero-trust">
             <li>
@@ -320,16 +356,24 @@ export function LandingPage() {
               ? "Piliin ang oo sa unang tanong ng survey. Ihahanda ng OSDS ang iyong Certificate of Appearance at ipapadala ang link sa iyong email."
               : "Choose yes on the survey's first question. OSDS prepares your Certificate of Appearance and emails you the link once it is signed and released."}
           </p>
-          <button
-            className="button primary large"
-            onClick={() => navigate("/survey")}
-            title="Start the survey and request a Certificate of Appearance"
+          <Tip
+            align="start"
+            text={
+              language === "tl"
+                ? "Ang sertipiko ay hinihiling sa unang tanong ng survey"
+                : "The certificate is requested on the survey's first question"
+            }
           >
-            {language === "tl"
-              ? "Humiling sa pamamagitan ng survey"
-              : "Request it through the survey"}
-            <ArrowRight size={18} />
-          </button>
+            <button
+              className="button primary large"
+              onClick={() => navigate("/survey")}
+            >
+              {language === "tl"
+                ? "Humiling sa pamamagitan ng survey"
+                : "Request it through the survey"}
+              <ArrowRight size={18} />
+            </button>
+          </Tip>
         </div>
         <figure className="coa-preview" aria-hidden="true">
           <header>CERTIFICATE OF APPEARANCE</header>
@@ -358,18 +402,25 @@ export function LandingPage() {
           <a href="tel:+63284411220">(02)8441-1220</a>
           <a href="tel:+63289880001">(02)8988-0001</a>
         </div>
-        <a
-          className="footer-social"
-          href="https://fb.com/osds.chedco"
-          target="_blank"
-          rel="noreferrer noopener"
-          title="Open the OSDS page on Facebook"
+        <Tip
+          text={
+            language === "tl"
+              ? "Bubukas sa bagong tab sa facebook.com"
+              : "Opens in a new tab on facebook.com"
+          }
         >
-          <FacebookMark />
-          {language === "tl"
-            ? "Sundan ang OSDS sa Facebook"
-            : "Follow OSDS on Facebook"}
-        </a>
+          <a
+            className="footer-social"
+            href="https://fb.com/osds.chedco"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <FacebookMark />
+            {language === "tl"
+              ? "Sundan ang OSDS sa Facebook"
+              : "Follow OSDS on Facebook"}
+          </a>
+        </Tip>
       </footer>
     </div>
   );

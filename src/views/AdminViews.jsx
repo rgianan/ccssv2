@@ -116,13 +116,14 @@ function AdminLogin({ onAuthenticated }) {
           resetKey={turnstileReset}
         />
         {error && <div className="alert">{error}</div>}
-        <button
-          className="button primary login-submit"
-          disabled={busy || !turnstileToken}
-          title="Sign in to the protected admin module"
-        >
-          <LogIn size={18} /> {busy ? "Signing in…" : "Sign in"}
-        </button>
+        <Tip text="Sign in to the protected admin module" block>
+          <button
+            className="button primary login-submit"
+            disabled={busy || !turnstileToken}
+          >
+            <LogIn size={18} /> {busy ? "Signing in…" : "Sign in"}
+          </button>
+        </Tip>
         <a
           href="/"
           onClick={(event) => {
@@ -149,7 +150,10 @@ const TABS = [
 ];
 
 const PAGE_COPY = {
-  overview: ["Overview", "Scores and volumes for the selected reporting period."],
+  overview: [
+    "Overview",
+    "Scores and volumes for the selected reporting period.",
+  ],
   responses: ["Responses", "Every Client Satisfaction Measurement submission."],
   certificates: [
     "Certificates of Appearance",
@@ -267,7 +271,9 @@ export function AdminDashboard() {
       <main className="admin-main">
         <header>
           <div>
-            <p className="eyebrow">CHED-OSDS · Client Satisfaction Measurement</p>
+            <p className="eyebrow">
+              CHED-OSDS · Client Satisfaction Measurement
+            </p>
             <h1>{heading}</h1>
             <p>{sub}</p>
           </div>
@@ -291,7 +297,9 @@ export function AdminDashboard() {
           {tab === "users" && isSuperadmin && (
             <UsersPanel onError={handleError} />
           )}
-          {tab === "audit" && isSuperadmin && <AuditPanel onError={handleError} />}
+          {tab === "audit" && isSuperadmin && (
+            <AuditPanel onError={handleError} />
+          )}
         </PanelBoundary>
       </main>
     </div>
@@ -386,7 +394,10 @@ function OverviewPanel({ period, onError }) {
         <article>
           <span>Responses · {describePeriod(period)}</span>
           <strong>{(data?.totalResponses ?? 0).toLocaleString()}</strong>
-          <Tip align="end" text="Submissions whose transaction date falls inside this reporting period.">
+          <Tip
+            align="end"
+            text="Submissions whose transaction date falls inside this reporting period."
+          >
             <i className="brand">
               <Inbox />
             </i>
@@ -396,7 +407,10 @@ function OverviewPanel({ period, onError }) {
           <span>Overall score</span>
           <strong>{overall ? overall.toFixed(2) : "—"}</strong>
           <small className="stat-note">{scoreLabel(overall)}</small>
-          <Tip align="end" text="The mean of every rated SQD answer in the period, weighted by respondent. N/A answers are left out rather than counted as zero.">
+          <Tip
+            align="end"
+            text="The mean of every rated SQD answer in the period, weighted by respondent. N/A answers are left out rather than counted as zero."
+          >
             <i className="gold">
               <BarChart3 />
             </i>
@@ -409,7 +423,10 @@ function OverviewPanel({ period, onError }) {
             {(data?.coa?.pending ?? 0).toLocaleString()} awaiting release (all
             periods)
           </small>
-          <Tip align="end" text="Issued counts this period. The awaiting figure spans every period, because a request left unissued does not expire.">
+          <Tip
+            align="end"
+            text="Issued counts this period. The awaiting figure spans every period, because a request left unissued does not expire."
+          >
             <i className="teal">
               <FileSignature />
             </i>
@@ -418,7 +435,10 @@ function OverviewPanel({ period, onError }) {
         <article>
           <span>Aware of the Citizen's Charter</span>
           <strong>{data?.ccAwareness ? `${data.ccAwareness}%` : "—"}</strong>
-          <Tip align="end" text="Respondents who answered CC1 with one of the first three options — that is, who knew of a Citizen's Charter or saw this office's.">
+          <Tip
+            align="end"
+            text="Respondents who answered CC1 with one of the first three options — that is, who knew of a Citizen's Charter or saw this office's."
+          >
             <i className="brand">
               <ShieldCheck />
             </i>
@@ -442,7 +462,9 @@ function OverviewPanel({ period, onError }) {
                     {question.dimension || "Overall satisfaction"}
                   </span>
                   <span className="bar-track">
-                    <i style={{ width: `${(value / maxServiceScore) * 100}%` }} />
+                    <i
+                      style={{ width: `${(value / maxServiceScore) * 100}%` }}
+                    />
                   </span>
                   <span className="bar-value">
                     {value ? value.toFixed(2) : "—"}
@@ -664,22 +686,30 @@ function ResponsesPanel({ onError }) {
           />
           {/* Filtering happens on the server now, so the search needs a visible
               trigger — pressing Enter is not a discoverable affordance. */}
-          <button className="mini-button" title="Search every response">
-            Search
-          </button>
+          <Tip
+            placement="bottom"
+            text="Searches the whole sheet, not just the page on screen"
+          >
+            <button className="mini-button">Search</button>
+          </Tip>
           {query && (
-            <button
-              type="button"
-              className="mini-button"
-              onClick={() => {
-                setDraftQuery("");
-                setOffset(0);
-                setQuery("");
-              }}
-              title="Clear the search"
+            <Tip
+              placement="bottom"
+              align="end"
+              text="Clear the search and show every response"
             >
-              Clear
-            </button>
+              <button
+                type="button"
+                className="mini-button"
+                onClick={() => {
+                  setDraftQuery("");
+                  setOffset(0);
+                  setQuery("");
+                }}
+              >
+                Clear
+              </button>
+            </Tip>
           )}
         </form>
       </div>
@@ -793,31 +823,33 @@ function ResponsesPanel({ onError }) {
       </div>
       {total > PAGE_SIZE && (
         <div className="pager">
-          <button
-            className="mini-button"
-            disabled={offset === 0 || loading}
-            onClick={() => {
-              setExpanded("");
-              setOffset(Math.max(0, offset - PAGE_SIZE));
-            }}
-            title="Show the previous page"
-          >
-            Previous
-          </button>
+          <Tip align="start" text="Show the previous 100 records">
+            <button
+              className="mini-button"
+              disabled={offset === 0 || loading}
+              onClick={() => {
+                setExpanded("");
+                setOffset(Math.max(0, offset - PAGE_SIZE));
+              }}
+            >
+              Previous
+            </button>
+          </Tip>
           <span>
             {firstShown}–{lastShown} of {total.toLocaleString()}
           </span>
-          <button
-            className="mini-button"
-            disabled={lastShown >= total || loading}
-            onClick={() => {
-              setExpanded("");
-              setOffset(offset + PAGE_SIZE);
-            }}
-            title="Show the next page"
-          >
-            Next
-          </button>
+          <Tip align="end" text="Show the next 100 records">
+            <button
+              className="mini-button"
+              disabled={lastShown >= total || loading}
+              onClick={() => {
+                setExpanded("");
+                setOffset(offset + PAGE_SIZE);
+              }}
+            >
+              Next
+            </button>
+          </Tip>
         </div>
       )}
     </section>

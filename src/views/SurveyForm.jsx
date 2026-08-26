@@ -26,7 +26,11 @@ import {
   sqdApplicable,
   t,
 } from "../lib/csm";
-import { getPortalConfig, refreshPortalConfig, submitResponse } from "../lib/api";
+import {
+  getPortalConfig,
+  refreshPortalConfig,
+  submitResponse,
+} from "../lib/api";
 import { Bilingual, Brand, LanguageToggle, TurnstileWidget } from "./shared";
 import { Skeleton, SkeletonRegion, Tip } from "./ui";
 import { navigate } from "../router";
@@ -87,7 +91,14 @@ const STEPS = [
   { en: "Suggestions", tl: "Mga mungkahi" },
 ];
 
-function ChoiceGroup({ name, options, value, onChange, language, columns = 1 }) {
+function ChoiceGroup({
+  name,
+  options,
+  value,
+  onChange,
+  language,
+  columns = 1,
+}) {
   return (
     <div className={`choice-group cols-${columns}`} role="radiogroup">
       {options.map((option) => (
@@ -240,7 +251,8 @@ export function SurveyForm() {
         (!isOtherService || form.otherService.trim()) &&
         (!form.age || (Number(form.age) >= 1 && Number(form.age) <= 120))
       );
-    if (step === 2) return ccApplicable(cc).every((question) => cc[question.id]);
+    if (step === 2)
+      return ccApplicable(cc).every((question) => cc[question.id]);
     if (step === 3)
       return sqdApplicable(ratedService).every((question) => sqd[question.id]);
     return true;
@@ -373,29 +385,45 @@ export function SurveyForm() {
             </div>
           )}
           <div className="success-actions">
-            <button
-              className="button secondary"
-              onClick={() => navigate("/")}
-              title="Return to the portal home page"
+            <Tip
+              text={
+                language === "tl"
+                  ? "Bumalik sa pangunahing pahina ng portal"
+                  : "Return to the portal home page"
+              }
             >
-              {language === "tl" ? "Bumalik sa Home" : "Back to home"}
-            </button>
-            <button
-              className="button ghost"
-              title="Submit another response"
-              onClick={() => {
-                setDone(null);
-                setStep(0);
-                setForm(createEmptyForm());
-                setCc({});
-                setSqd({});
-                setFeesRequiredFor("");
-                setTurnstileToken("");
-                setTurnstileReset((value) => value + 1);
-              }}
+              <button
+                className="button secondary"
+                onClick={() => navigate("/")}
+              >
+                {language === "tl" ? "Bumalik sa Home" : "Back to home"}
+              </button>
+            </Tip>
+            <Tip
+              text={
+                language === "tl"
+                  ? "Magsimula ng bagong sagot para sa ibang transaksyon"
+                  : "Start a fresh response for another transaction"
+              }
             >
-              {language === "tl" ? "Magsumite ulit" : "Submit another response"}
-            </button>
+              <button
+                className="button ghost"
+                onClick={() => {
+                  setDone(null);
+                  setStep(0);
+                  setForm(createEmptyForm());
+                  setCc({});
+                  setSqd({});
+                  setFeesRequiredFor("");
+                  setTurnstileToken("");
+                  setTurnstileReset((value) => value + 1);
+                }}
+              >
+                {language === "tl"
+                  ? "Magsumite ulit"
+                  : "Submit another response"}
+              </button>
+            </Tip>
           </div>
         </div>
       </main>
@@ -729,7 +757,9 @@ export function SurveyForm() {
                 </label>
                 <fieldset className="field-block">
                   <legend>
-                    {language === "tl" ? "Serbisyong nakuha" : "Service availed"}{" "}
+                    {language === "tl"
+                      ? "Serbisyong nakuha"
+                      : "Service availed"}{" "}
                     <b>*</b>
                   </legend>
                   {/* The one place a client waits on the network. Four blocks
@@ -810,7 +840,8 @@ export function SurveyForm() {
                   <fieldset className="field-block" key={question.id}>
                     <legend>
                       <span className="sqd-number">{question.number}</span>
-                      <Bilingual entry={question} language={language} /> <b>*</b>
+                      <Bilingual entry={question} language={language} />{" "}
+                      <b>*</b>
                     </legend>
                     <ChoiceGroup
                       name={question.id}
@@ -874,7 +905,9 @@ export function SurveyForm() {
                 <div className="section-heading">
                   <span>05</span>
                   <div>
-                    <h2>{language === "tl" ? "Mga mungkahi" : "Suggestions"}</h2>
+                    <h2>
+                      {language === "tl" ? "Mga mungkahi" : "Suggestions"}
+                    </h2>
                     <p>
                       {language === "tl"
                         ? "Suriin ang buod, pagkatapos ay isumite ang iyong sagot."
@@ -942,42 +975,60 @@ export function SurveyForm() {
           </div>
 
           <footer className="form-footer">
-            <button
-              className="button ghost"
-              disabled={step === 0}
-              onClick={() => advance(-1)}
-              title="Return to the previous step"
-            >
-              <ArrowLeft size={18} /> {language === "tl" ? "Bumalik" : "Back"}
-            </button>
-            <button
-              className="button primary"
-              disabled={busy || (step === STEPS.length - 1 && !turnstileToken)}
-              onClick={next}
-              title={
-                step === STEPS.length - 1
-                  ? "Submit your Client Satisfaction Measurement response"
-                  : "Continue to the next step"
+            <Tip
+              align="start"
+              text={
+                language === "tl"
+                  ? "Bumalik sa nakaraang hakbang. Nananatili ang mga sagot mo."
+                  : "Go back a step. Your answers are kept."
               }
             >
-              {busy
-                ? language === "tl"
-                  ? "Isinusumite…"
-                  : "Submitting…"
-                : step === STEPS.length - 1
+              <button
+                className="button ghost"
+                disabled={step === 0}
+                onClick={() => advance(-1)}
+              >
+                <ArrowLeft size={18} /> {language === "tl" ? "Bumalik" : "Back"}
+              </button>
+            </Tip>
+            <Tip
+              align="end"
+              text={
+                step === STEPS.length - 1
                   ? language === "tl"
-                    ? "Isumite"
-                    : "Submit"
+                    ? "Ipadala ang iyong sagot sa OSDS. Hindi na ito mababago pagkatapos."
+                    : "Send your response to the OSDS. It cannot be changed afterwards."
                   : language === "tl"
-                    ? "Magpatuloy"
-                    : "Continue"}
-              {!busy &&
-                (step === STEPS.length - 1 ? (
-                  <Check size={18} />
-                ) : (
-                  <ArrowRight size={18} />
-                ))}
-            </button>
+                    ? "Magpatuloy sa susunod na hakbang"
+                    : "Continue to the next step"
+              }
+            >
+              <button
+                className="button primary"
+                disabled={
+                  busy || (step === STEPS.length - 1 && !turnstileToken)
+                }
+                onClick={next}
+              >
+                {busy
+                  ? language === "tl"
+                    ? "Isinusumite…"
+                    : "Submitting…"
+                  : step === STEPS.length - 1
+                    ? language === "tl"
+                      ? "Isumite"
+                      : "Submit"
+                    : language === "tl"
+                      ? "Magpatuloy"
+                      : "Continue"}
+                {!busy &&
+                  (step === STEPS.length - 1 ? (
+                    <Check size={18} />
+                  ) : (
+                    <ArrowRight size={18} />
+                  ))}
+              </button>
+            </Tip>
           </footer>
         </section>
       </main>

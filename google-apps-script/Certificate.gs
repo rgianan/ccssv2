@@ -331,9 +331,18 @@ function issueCoa_(responseId, issueKey, outputFolder) {
 
     // The certificate exists and is recorded; a mail failure is worth
     // reporting but must not roll the record back to ERROR.
+    //
+    // The PDF itself goes with the mail. A link is only useful to someone the
+    // file is shared with, and this Workspace forbids link sharing, so the
+    // client was being sent a certificate they could not open. The attachment
+    // does not depend on any sharing policy; the link is included only when
+    // sharing actually succeeded, and the Drive copy remains the office record.
     var emailStatus;
     try {
-      emailStatus = sendCoaEmail_(record, certificateUrl, verificationCode, verificationUrl, settings);
+      emailStatus = sendCoaEmail_(
+        record, sharingNote ? '' : certificateUrl, verificationCode,
+        verificationUrl, settings, pdfBlob,
+      );
     } catch (mailError) {
       emailStatus = 'The certificate was issued, but the email could not be sent (' +
         String(mailError && mailError.message || mailError).slice(0, 160) +
@@ -362,34 +371,188 @@ function issueCoa_(responseId, issueKey, outputFolder) {
   }
 }
 
-function sendCoaEmail_(record, certificateUrl, verificationCode, verificationUrl, settings) {
+/**
+ * Sends the certificate to the client as an attachment.
+ *
+ * `certificateUrl` is blank whenever link sharing was refused, because a Drive
+ * link to a file the recipient has no access to is worse than no link at all —
+ * it looks like the office sent something broken. The PDF is attached either
+ * way, so delivery never depends on a sharing policy the office may not
+ * control.
+ */
+function sendCoaEmail_(record, certificateUrl, verificationCode, verificationUrl, settings, pdfBlob) {
   if (!record.email) return 'No recipient email on file.';
   if (MailApp.getRemainingDailyQuota() < 1)
-    return 'Certificate created, but the daily email quota is exhausted. Send the link manually.';
+    return 'Certificate created, but the daily email quota is exhausted. Send it manually.';
   var office = settings.office_name || 'Office of Student Development and Services (OSDS)';
   var salutation = safeTrim_(record.coaTitle + ' ' + record.coaName) || 'Sir/Madam';
+
+  // Settled before either body is written. Both of them tell the client where
+  // the certificate is, so composing them first and attaching afterwards meant
+  // a refused copyBlob() sent a mail promising an attachment that was not
+  // there — and when link sharing had also been refused, that mail carried no
+  // certificate and no link at all.
+  var attachments = null;
+  if (pdfBlob) {
+    try {
+      // A certificate PDF is a few hundred kilobytes, far inside the 25 MB cap.
+      attachments = [pdfBlob.copyBlob()];
+    } catch (attachError) {
+      console.error('Certificate attachment skipped: ' +
+        String(attachError && attachError.message || attachError));
+    }
+  }
+
+  // Nothing to hand over: say so plainly rather than describe a delivery that
+  // did not happen. The office still holds the file and the admin is told.
+  var whereItIs = attachments
+    ? 'is attached to this email as a PDF'
+    : certificateUrl
+      ? 'is ready'
+      : 'has been issued, but could not be delivered with this message';
+  var closing = attachments || certificateUrl
+    ? ''
+    : 'Please reply to this email and the office will send it to you.\n\n';
+
   var text =
     'Dear ' + salutation + ',\n\n' +
-    'Your Certificate of Appearance from the ' + office + ' is ready:\n' + certificateUrl + '\n\n' +
+    'Your Certificate of Appearance from the ' + office + ' ' + whereItIs + '.\n\n' +
+    (certificateUrl ? 'You can open it here:\n' + certificateUrl + '\n\n' : '') +
+    closing +
     (verificationUrl ? 'Verification code: ' + verificationCode + '\nVerify: ' + verificationUrl + '\n\n' : '') +
     'Thank you for answering our Client Satisfaction Measurement survey.';
-  var html =
-    '<p>Dear ' + escapeHtml_(salutation) + ',</p>' +
-    '<p>Your Certificate of Appearance from the <b>' + escapeHtml_(office) + '</b> is ready:</p>' +
-    '<p><a href="' + escapeHtml_(certificateUrl) + '">Open your certificate (PDF)</a></p>' +
-    (verificationUrl
-      ? '<p>Verification code: <b>' + escapeHtml_(verificationCode) + '</b><br>' +
-        '<a href="' + escapeHtml_(verificationUrl) + '">Verify this certificate</a></p>'
-      : '') +
-    '<p>Thank you for answering our Client Satisfaction Measurement survey.</p>';
-  MailApp.sendEmail({
+
+  var message = {
     to: record.email,
     subject: 'Certificate of Appearance — ' + record.coaName,
     body: text,
-    htmlBody: html,
+    htmlBody: coaEmailHtml_({
+      office: office,
+      salutation: salutation,
+      certificateUrl: certificateUrl,
+      verificationCode: verificationCode,
+      verificationUrl: verificationUrl,
+      attached: !!attachments
+    }),
     name: office
-  });
-  return 'Emailed to ' + record.email + '.';
+  };
+  if (attachments) message.attachments = attachments;
+
+  MailApp.sendEmail(message);
+  if (attachments) return 'Emailed to ' + record.email + ' with the certificate attached.';
+  if (certificateUrl) return 'Emailed to ' + record.email + ' with a link to the certificate.';
+  return 'Emailed to ' + record.email + ', but neither an attachment nor a link could be included. Send the PDF from Drive.';
+}
+
+/** The office mark, forced to PNG: email clients proxy images and several of
+ *  them cannot decode the WebP that `f-auto` would negotiate. */
+var COA_EMAIL_LOGO_ = 'https://ik.imagekit.io/k2qmtccm6/CHED_Logo_New.png?tr=w-120,q-85';
+
+/**
+ * The certificate email, laid out as a mail client will actually render it.
+ *
+ * Tables and inline styles throughout, because Gmail discards <style> blocks
+ * and neither flexbox nor grid can be relied on. Everything is sized in pixels
+ * and the palette is written out rather than referenced, since custom
+ * properties do not survive either.
+ *
+ * The banner is a solid colour with white text rather than a background image,
+ * so the header still reads when a client blocks images — which most do by
+ * default, and this is the first email a stranger receives from the office.
+ */
+function coaEmailHtml_(view) {
+  var BLUE = '#0032a0', DEEP = '#001b5e', INK = '#16223c', BODY = '#4d5563',
+      MUTED = '#66748a', LINE = '#dae2ec', WASH = '#f5f8fc';
+  var esc = escapeHtml_;
+
+  function button(href, label) {
+    return '' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:26px 0 0;">' +
+        '<tr><td bgcolor="' + BLUE + '" style="border-radius:10px;">' +
+          '<a href="' + esc(href) + '" ' +
+             'style="display:inline-block;padding:14px 26px;font:700 14px/1 -apple-system,BlinkMacSystemFont,' +
+             '&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:#ffffff;text-decoration:none;' +
+             'border-radius:10px;">' + esc(label) + '</a>' +
+        '</td></tr>' +
+      '</table>';
+  }
+
+  var intro = view.attached
+    ? 'Your <b>Certificate of Appearance</b> from the ' + esc(view.office) +
+      ' is <b>attached to this email</b> as a PDF.'
+    : 'Your <b>Certificate of Appearance</b> from the ' + esc(view.office) + ' is ready.';
+
+  return '' +
+'<!doctype html><html><body style="margin:0;padding:0;background:' + WASH + ';">' +
+'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="' + WASH + '" style="background:' + WASH + ';padding:28px 12px;">' +
+ '<tr><td align="center">' +
+  '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid ' + LINE + ';border-radius:14px;overflow:hidden;">' +
+
+   // Banner
+   '<tr><td bgcolor="' + DEEP + '" style="background:' + DEEP + ';padding:22px 30px;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+     '<td width="40" style="padding-right:12px;">' +
+      '<img src="' + COA_EMAIL_LOGO_ + '" width="40" height="40" alt="" ' +
+        'style="display:block;width:40px;height:40px;border:0;">' +
+     '</td>' +
+     '<td style="font:700 14px/1.35 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:#ffffff;">' +
+      'Commission on Higher Education' +
+      '<div style="font-weight:400;font-size:12px;color:#b9cbe8;padding-top:2px;">' + esc(view.office) + '</div>' +
+     '</td>' +
+    '</tr></table>' +
+   '</td></tr>' +
+
+   // Body
+   '<tr><td style="padding:30px;font:400 14px/1.65 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:' + BODY + ';">' +
+    '<div style="font:700 11px/1 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;letter-spacing:0.14em;text-transform:uppercase;color:#5074a9;padding-bottom:10px;">' +
+      'Certificate of Appearance</div>' +
+    '<h1 style="margin:0 0 18px;font:700 24px/1.25 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:' + INK + ';">' +
+      'Your certificate is ready</h1>' +
+    '<p style="margin:0 0 14px;">Dear ' + esc(view.salutation) + ',</p>' +
+    '<p style="margin:0;">' + intro + '</p>' +
+    (view.certificateUrl ? button(view.certificateUrl, 'Open your certificate (PDF)') : '') +
+
+    // Verification panel
+    (view.verificationCode
+      ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+          'style="margin:26px 0 0;background:' + WASH + ';border:1px solid ' + LINE + ';border-radius:10px;">' +
+         '<tr><td style="padding:16px 18px;">' +
+          '<div style="font:700 10px/1 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;letter-spacing:0.12em;text-transform:uppercase;color:' + MUTED + ';padding-bottom:8px;">' +
+            'Verification code</div>' +
+          '<div style="font:700 15px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:' + INK + ';letter-spacing:0.04em;word-break:break-all;">' +
+            esc(view.verificationCode) + '</div>' +
+          (view.verificationUrl
+            ? '<div style="padding-top:8px;"><a href="' + esc(view.verificationUrl) + '" ' +
+              'style="font-size:12.5px;color:' + BLUE + ';text-decoration:underline;">Confirm this certificate is genuine</a></div>'
+            : '') +
+         '</td></tr>' +
+        '</table>'
+      : '') +
+
+    // Keepsake note. The fallback URL is only printed when there is a link
+    // worth falling back to — a Drive URL nobody outside the office can open
+    // is not one.
+    '<p style="margin:24px 0 0;font-size:12.5px;color:' + MUTED + ';">' +
+      'Please keep this email for your records.' +
+      (view.certificateUrl
+        ? ' If the button does not work, copy this link:<br>' +
+          '<a href="' + esc(view.certificateUrl) + '" style="color:' + BLUE + ';word-break:break-all;">' +
+            esc(view.certificateUrl) + '</a>'
+        : '') +
+    '</p>' +
+    '<p style="margin:18px 0 0;font-size:12.5px;color:' + MUTED + ';">' +
+      'Thank you for answering our Client Satisfaction Measurement survey.</p>' +
+   '</td></tr>' +
+
+   // Footer
+   '<tr><td bgcolor="' + WASH + '" style="background:' + WASH + ';border-top:1px solid ' + LINE + ';padding:18px 30px;' +
+     'font:400 11.5px/1.6 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:' + MUTED + ';">' +
+     esc(view.office) + '<br>Commission on Higher Education' +
+   '</td></tr>' +
+
+  '</table>' +
+ '</td></tr>' +
+'</table></body></html>';
 }
 
 // -------------------------------- Uploads --------------------------------------
@@ -457,8 +620,12 @@ function verifyCertificate(code) {
     agency: record.coaAgency,
     purpose: record.coaPurpose,
     dateCoverage: dateCoverage_(record.coaDateFrom, record.coaDateTo),
-    issuedAt: record.coaIssuedAt,
-    certificateUrl: record.coaLink
+    issuedAt: record.coaIssuedAt
+    // Deliberately no certificate link. The stored one points into the office's
+    // Drive, which opens for staff and shows "Request access" to everybody
+    // else — a dead end on a page whose whole job is to reassure a stranger
+    // that the document in their hand is genuine. The details above are the
+    // verification; the client already holds the PDF, attached to their email.
   };
   // Only a positive is cached, and issuance clears it: a code that is not yet
   // released must start verifying the moment it is.

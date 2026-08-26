@@ -55,6 +55,13 @@ function Feedback({ error, notice }) {
 
 const COA_STATUSES = ["REQUESTED", "ISSUED", "ERROR"];
 
+/** What each filter actually selects, since the button labels are terse. */
+const COA_FILTER_HELP = {
+  REQUESTED: "Clients who asked for a certificate that has not been issued yet",
+  ISSUED: "Certificates already generated and emailed to the client",
+  ERROR: "Attempts that failed. Check the details, then try issuing again",
+};
+
 /**
  * One key per unresolved issuance attempt, held in sessionStorage rather than
  * in component state. The attempt this protects is the one that timed out, and
@@ -103,8 +110,21 @@ const COA_COLUMNS = [
   "Purpose",
   "Date covered",
   "Status",
-  "",
+  "Actions",
 ];
+
+/**
+ * Said once on the header rather than on each row.
+ *
+ * A tooltip inside .table-scroll is clipped by it — the container needs
+ * overflow-x for wide tables, which forces overflow-y, so a bubble is cut off
+ * at the top row or the bottom one whichever way it opens. These three
+ * explanations were identical on every row anyway.
+ */
+const COA_ACTIONS_HELP =
+  "Edit changes the wording printed on the certificate. " +
+  "PDF opens the issued file in the office's Drive — the client has their own copy by email. " +
+  "Generate builds the PDF and emails it as an attachment; Reissue does it again, and the earlier certificate stays valid.";
 
 export function CertificatePanel({ onError }) {
   const [rows, setRows] = useState([]),
@@ -142,7 +162,10 @@ export function CertificatePanel({ onError }) {
     setError("");
     setNotice("");
     try {
-      const result = await generateCoa(row.referenceId, issueKeyFor(row.referenceId));
+      const result = await generateCoa(
+        row.referenceId,
+        issueKeyFor(row.referenceId),
+      );
       // Resolved, so a later deliberate reissue counts as a new attempt.
       clearIssueKey(row.referenceId);
       setNotice(
@@ -192,27 +215,38 @@ export function CertificatePanel({ onError }) {
     <section className="stacked">
       <div className="filter-bar">
         {COA_STATUSES.map((option) => (
-          <button
+          <Tip
             key={option}
-            className={status === option ? "active" : ""}
-            onClick={() => setStatus(option)}
-            title={`Show ${option.toLowerCase()} certificate requests`}
+            placement="bottom"
+            align="start"
+            text={COA_FILTER_HELP[option] || option}
           >
-            {option === "REQUESTED"
-              ? "Awaiting release"
-              : option === "ISSUED"
-                ? "Issued"
-                : "Failed"}
-          </button>
+            <button
+              className={status === option ? "active" : ""}
+              onClick={() => setStatus(option)}
+            >
+              {option === "REQUESTED"
+                ? "Awaiting release"
+                : option === "ISSUED"
+                  ? "Issued"
+                  : "Failed"}
+            </button>
+          </Tip>
         ))}
-        <button
-          className="mini-button push-right"
-          onClick={() => load()}
-          disabled={loading}
-          title="Reload certificate requests"
+        <Tip
+          className="push-right"
+          placement="bottom"
+          align="end"
+          text="Re-read the list from the sheet"
         >
-          <RefreshCw size={13} /> {loading ? "Loading…" : "Refresh"}
-        </button>
+          <button
+            className="mini-button"
+            onClick={() => load()}
+            disabled={loading}
+          >
+            <RefreshCw size={13} /> {loading ? "Loading…" : "Refresh"}
+          </button>
+        </Tip>
       </div>
 
       <Feedback error={error} notice={notice} />
@@ -225,90 +259,100 @@ export function CertificatePanel({ onError }) {
           <SkeletonTable columns={COA_COLUMNS} rows={5} />
         </SkeletonRegion>
       ) : (
-      <div className={`table-card${loading ? " is-refreshing" : ""}`}>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                {COA_COLUMNS.map((column, index) => (
-                  <th key={index}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.referenceId}>
-                  <td>
-                    <strong>
-                      {row.coaTitle} {row.coaName}
-                    </strong>
-                    <small>
-                      {row.referenceId} · {row.email}
-                    </small>
-                  </td>
-                  <td>{row.coaAgency}</td>
-                  <td className="wrap-cell">{row.coaPurpose}</td>
-                  <td>{row.coaDateCoverage}</td>
-                  <td>
-                    <span
-                      className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus?.startsWith("ERROR") ? "failed" : "pending"}`}
-                    >
-                      {row.coaStatus}
-                    </span>
-                    {row.coaError && <small title={row.coaError}>{row.coaError}</small>}
-                  </td>
-                  <td>
-                    <div className="row-actions">
-                      <button
-                        className="mini-button"
-                        onClick={() => setEditing({ ...row })}
-                        title="Edit the details printed on the certificate"
-                      >
-                        Edit
-                      </button>
-                      {row.coaLink && (
-                        <a
-                          className="mini-button"
-                          href={row.coaLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="Open the issued certificate PDF"
-                        >
-                          <ExternalLink size={12} /> PDF
-                        </a>
-                      )}
-                      <button
-                        className="mini-button primary"
-                        disabled={busyId === row.referenceId}
-                        onClick={() => issue(row)}
-                        title={
-                          row.coaStatus === "ISSUED"
-                            ? "Regenerate and re-send this certificate"
-                            : "Generate the certificate and email the link"
-                        }
-                      >
-                        <FileSignature size={12} />
-                        {busyId === row.referenceId
-                          ? "Working…"
-                          : row.coaStatus === "ISSUED"
-                            ? "Reissue"
-                            : "Generate"}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!rows.length && !loading && (
+        <div className={`table-card${loading ? " is-refreshing" : ""}`}>
+          <div className="table-scroll">
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={6} className="empty-cell">
-                    No certificate requests with this status.
-                  </td>
+                  {COA_COLUMNS.map((column, index) => (
+                    <th key={index}>
+                      {column === "Actions" ? (
+                        <Tip
+                          align="end"
+                          placement="bottom"
+                          text={COA_ACTIONS_HELP}
+                        >
+                          <span tabIndex={0} className="th-help">
+                            Actions
+                          </span>
+                        </Tip>
+                      ) : (
+                        column
+                      )}
+                    </th>
+                  ))}
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.referenceId}>
+                    <td>
+                      <strong>
+                        {row.coaTitle} {row.coaName}
+                      </strong>
+                      <small>
+                        {row.referenceId} · {row.email}
+                      </small>
+                    </td>
+                    <td>{row.coaAgency}</td>
+                    <td className="wrap-cell">{row.coaPurpose}</td>
+                    <td>{row.coaDateCoverage}</td>
+                    <td>
+                      <span
+                        className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus?.startsWith("ERROR") ? "failed" : "pending"}`}
+                      >
+                        {row.coaStatus}
+                      </span>
+                      {/* No tooltip: `td small` wraps, so the whole message is already on
+                        screen. A bubble repeating the text under the cursor
+                        would say nothing new. */}
+                      {row.coaError && <small>{row.coaError}</small>}
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          className="mini-button"
+                          onClick={() => setEditing({ ...row })}
+                        >
+                          Edit
+                        </button>
+                        {row.coaLink && (
+                          <a
+                            className="mini-button"
+                            href={row.coaLink}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <ExternalLink size={12} /> PDF
+                          </a>
+                        )}
+                        <button
+                          className="mini-button primary"
+                          disabled={busyId === row.referenceId}
+                          onClick={() => issue(row)}
+                        >
+                          <FileSignature size={12} />
+                          {busyId === row.referenceId
+                            ? "Working…"
+                            : row.coaStatus === "ISSUED"
+                              ? "Reissue"
+                              : "Generate"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!rows.length && !loading && (
+                  <tr>
+                    <td colSpan={6} className="empty-cell">
+                      No certificate requests with this status.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
       )}
 
       {editing && (
@@ -400,9 +444,14 @@ export function CertificatePanel({ onError }) {
               >
                 Cancel
               </button>
-              <button className="button primary" title="Save certificate details">
-                <Check size={16} /> Save details
-              </button>
+              <Tip
+                align="end"
+                text="Save these details. They are what the certificate will print."
+              >
+                <button className="button primary">
+                  <Check size={16} /> Save details
+                </button>
+              </Tip>
             </footer>
           </form>
         </div>
@@ -475,7 +524,9 @@ export function ReportsPanel({ period, onError }) {
       // unsaved edit would silently not appear in the generated report.
       await saveServiceStats(period, stats);
       const report = await generateReport(period);
-      setNotice(`Report ready: ${report.name}. ${report.accessNote || ""}`.trim());
+      setNotice(
+        `Report ready: ${report.name}. ${report.accessNote || ""}`.trim(),
+      );
       setReports(await getGeneratedReports());
       // Opening is a convenience, not the record — the workbook is listed
       // below either way, and accessNote explains a refused share.
@@ -512,7 +563,10 @@ export function ReportsPanel({ period, onError }) {
           <div className="panel-head">
             <Skeleton width={168} height={16} />
           </div>
-          <SkeletonTable columns={["Report", "Period", "Generated", ""]} rows={3} />
+          <SkeletonTable
+            columns={["Report", "Period", "Generated", ""]}
+            rows={3}
+          />
         </article>
       </SkeletonRegion>
     );
@@ -531,14 +585,18 @@ export function ReportsPanel({ period, onError }) {
               generating the workbook.
             </p>
           </div>
-          <button
-            className="button secondary"
-            onClick={persist}
-            disabled={saving}
-            title="Save these counts for the selected period"
+          <Tip
+            align="end"
+            text="Store these counts against the selected period. The report reads them from the sheet."
           >
-            {saving ? "Saving…" : "Save counts"}
-          </button>
+            <button
+              className="button secondary"
+              onClick={persist}
+              disabled={saving}
+            >
+              {saving ? "Saving…" : "Save counts"}
+            </button>
+          </Tip>
         </div>
         <div className="table-scroll">
           <table>
@@ -566,7 +624,11 @@ export function ReportsPanel({ period, onError }) {
                       className="cell-input"
                       value={row.clients ?? ""}
                       onChange={(event) =>
-                        updateStat(row.service_id, "clients", event.target.value)
+                        updateStat(
+                          row.service_id,
+                          "clients",
+                          event.target.value,
+                        )
                       }
                       aria-label={`Clients served for ${row.code}`}
                     />
@@ -592,7 +654,11 @@ export function ReportsPanel({ period, onError }) {
                       className="cell-input wide"
                       value={row.remarks ?? ""}
                       onChange={(event) =>
-                        updateStat(row.service_id, "remarks", event.target.value)
+                        updateStat(
+                          row.service_id,
+                          "remarks",
+                          event.target.value,
+                        )
                       }
                       aria-label={`Remarks for ${row.code}`}
                     />
@@ -615,20 +681,24 @@ export function ReportsPanel({ period, onError }) {
         <div>
           <h2>Generate the CSM Summary Report</h2>
           <p>
-            Produces an Excel workbook in the ARTA layout: a CSM Summary sheet, a
-            DATA sheet, and one worksheet per program for{" "}
+            Produces an Excel workbook in the ARTA layout: a CSM Summary sheet,
+            a DATA sheet, and one worksheet per program for{" "}
             <b>{describePeriod(period)}</b>.
           </p>
         </div>
-        <button
-          className="button primary large"
-          onClick={build}
-          disabled={generating}
-          title="Build the workbook for the selected period"
+        <Tip
+          align="end"
+          text="Saves the counts above first, then builds the workbook. This can take a minute."
         >
-          <FileSpreadsheet size={18} />
-          {generating ? "Generating…" : "Generate report"}
-        </button>
+          <button
+            className="button primary large"
+            onClick={build}
+            disabled={generating}
+          >
+            <FileSpreadsheet size={18} />
+            {generating ? "Generating…" : "Generate report"}
+          </button>
+        </Tip>
       </article>
 
       <article className="panel">
@@ -662,7 +732,6 @@ export function ReportsPanel({ period, onError }) {
                       href={report.url}
                       target="_blank"
                       rel="noreferrer"
-                      title="Download this workbook"
                     >
                       <Download size={12} /> Open
                     </a>
@@ -801,7 +870,9 @@ export function ServicesPanel({ onError }) {
           <textarea
             required
             value={form.name_en}
-            onChange={(event) => setForm({ ...form, name_en: event.target.value })}
+            onChange={(event) =>
+              setForm({ ...form, name_en: event.target.value })
+            }
             placeholder="Application for …"
           />
         </label>
@@ -809,7 +880,9 @@ export function ServicesPanel({ onError }) {
           Name (Tagalog)
           <textarea
             value={form.name_tl}
-            onChange={(event) => setForm({ ...form, name_tl: event.target.value })}
+            onChange={(event) =>
+              setForm({ ...form, name_tl: event.target.value })
+            }
             placeholder="Aplikasyon para sa …"
           />
           <small>Shown when a client switches the form to Tagalog.</small>
@@ -869,7 +942,11 @@ export function ServicesPanel({ onError }) {
           everybody who transacts there pays.
         </small>
         <button className="button primary" disabled={saving}>
-          {saving ? "Saving…" : form.service_id ? "Update program" : "Add program"}
+          {saving
+            ? "Saving…"
+            : form.service_id
+              ? "Update program"
+              : "Add program"}
         </button>
       </form>
 
@@ -1043,7 +1120,8 @@ export function SettingsPanel({ onError, canSign = false }) {
           : await uploadSignature(file);
       const next = {
         ...settings,
-        [kind === "template" ? "coa_template_id" : "coa_signature_id"]: result.id,
+        [kind === "template" ? "coa_template_id" : "coa_signature_id"]:
+          result.id,
         [kind === "template" ? "coa_template_name" : "coa_signature_name"]:
           result.name,
       };
@@ -1138,7 +1216,9 @@ export function SettingsPanel({ onError, canSign = false }) {
             <p>
               Upload the Word template. Supported placeholders:{" "}
               <code>
-                {"{{title}} {{name_of_client}} {{agency}} {{purpose}} {{date_coverage}} {{date_issued}} {{signatory}} {{designation}} {{Timestamp}}"}
+                {
+                  "{{title}} {{name_of_client}} {{agency}} {{purpose}} {{date_coverage}} {{date_issued}} {{signatory}} {{designation}} {{Timestamp}}"
+                }
               </code>
               , plus the optional <code>{"{{VerificationCode}}"}</code> and{" "}
               <code>{"{{QRCode}}"}</code>.
@@ -1265,7 +1345,9 @@ export function UsersPanel({ onError }) {
             type="email"
             disabled={Boolean(form.user_id)}
             value={form.email}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
+            onChange={(event) =>
+              setForm({ ...form, email: event.target.value })
+            }
           />
         </label>
         <label>
@@ -1324,51 +1406,50 @@ export function UsersPanel({ onError }) {
             rows={4}
           />
         ) : (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Updated</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr key={user.user_id || user.email}>
-                  <td>
-                    <strong>{user.name}</strong>
-                    <small>
-                      {user.email}
-                      <br />
-                      {user.user_id}
-                    </small>
-                  </td>
-                  <td>{user.role}</td>
-                  <td>
-                    <span
-                      className={`status-pill ${user.active ? "enabled" : "disabled"}`}
-                    >
-                      {user.active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td>{user.updated_at || user.created_at || "—"}</td>
-                  <td>
-                    <button
-                      className="mini-button"
-                      onClick={() => setForm({ ...user, password: "" })}
-                      title={`Edit ${user.name}`}
-                    >
-                      Edit
-                    </button>
-                  </td>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.user_id || user.email}>
+                    <td>
+                      <strong>{user.name}</strong>
+                      <small>
+                        {user.email}
+                        <br />
+                        {user.user_id}
+                      </small>
+                    </td>
+                    <td>{user.role}</td>
+                    <td>
+                      <span
+                        className={`status-pill ${user.active ? "enabled" : "disabled"}`}
+                      >
+                        {user.active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td>{user.updated_at || user.created_at || "—"}</td>
+                    <td>
+                      <button
+                        className="mini-button"
+                        onClick={() => setForm({ ...user, password: "" })}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </section>
@@ -1379,7 +1460,12 @@ export function UsersPanel({ onError }) {
 
 export function AuditPanel({ onError }) {
   const [data, setData] = useState(null),
-    [filters, setFilters] = useState({ action: "", outcome: "", query: "", limit: 200 }),
+    [filters, setFilters] = useState({
+      action: "",
+      outcome: "",
+      query: "",
+      limit: 200,
+    }),
     [loading, setLoading] = useState(true);
   const load = async (nextFilters = filters) => {
     setLoading(true);
@@ -1395,7 +1481,9 @@ export function AuditPanel({ onError }) {
     load();
   }, []);
   const entries = data?.entries || [];
-  const failures = entries.filter((entry) => entry.outcome === "FAILURE").length;
+  const failures = entries.filter(
+    (entry) => entry.outcome === "FAILURE",
+  ).length;
   const logins = entries.filter(
     (entry) => entry.action === "LOGIN" && entry.outcome === "SUCCESS",
   ).length;
@@ -1508,8 +1596,8 @@ export function AuditPanel({ onError }) {
             {data.integrity.dropped > 0 ? (
               <>
                 {data.integrity.dropped} audit{" "}
-                {data.integrity.dropped === 1 ? "entry" : "entries"} could not be
-                written, so this log has known gaps
+                {data.integrity.dropped === 1 ? "entry" : "entries"} could not
+                be written, so this log has known gaps
                 {data.integrity.droppedLast
                   ? ` (most recently ${data.integrity.droppedLast})`
                   : ""}

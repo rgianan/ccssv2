@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { Languages } from "lucide-react";
 import { LANGUAGES } from "../lib/csm";
+import { Tip } from "./ui";
 import { navigate } from "../router";
 
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
@@ -69,28 +70,31 @@ export function Brand({
   light = false,
 }) {
   return (
-    <a
-      className={`brand${light ? " light" : ""}`}
-      href="/"
-      onClick={(event) => {
-        event.preventDefault();
-        navigate("/");
-      }}
-      title="Return to the CHED-OSDS portal home page"
-    >
-      {/* Explicit dimensions reserve the box before the image arrives, so the
+    /* Every `.brand` rule is a descendant selector, so the wrapper this adds
+       does not disturb the mark in any of the four places it appears. */
+    <Tip placement="bottom" align="start" text="Return to the portal home page">
+      <a
+        className={`brand${light ? " light" : ""}`}
+        href="/"
+        onClick={(event) => {
+          event.preventDefault();
+          navigate("/");
+        }}
+      >
+        {/* Explicit dimensions reserve the box before the image arrives, so the
           brand text does not jump when it does. */}
-      <img
-        src={CHED_LOGO}
-        alt="Commission on Higher Education logo"
-        width="38"
-        height="38"
-      />
-      <span>
-        <strong>{name}</strong>
-        <small>{subtitle}</small>
-      </span>
-    </a>
+        <img
+          src={CHED_LOGO}
+          alt="Commission on Higher Education logo"
+          width="38"
+          height="38"
+        />
+        <span>
+          <strong>{name}</strong>
+          <small>{subtitle}</small>
+        </span>
+      </a>
+    </Tip>
   );
 }
 
@@ -105,16 +109,20 @@ export function LanguageToggle({ language, onChange }) {
           buttons identically — in the one control that changes the language of
           every question on the page. */}
       {LANGUAGES.map((option) => (
-        <button
+        <Tip
           key={option.id}
-          type="button"
-          aria-pressed={language === option.id}
-          className={language === option.id ? "active" : ""}
-          onClick={() => onChange(option.id)}
-          title={`Show the form in ${option.label}`}
+          placement="bottom"
+          text={`Show the form in ${option.label}`}
         >
-          {option.short}
-        </button>
+          <button
+            type="button"
+            aria-pressed={language === option.id}
+            className={language === option.id ? "active" : ""}
+            onClick={() => onChange(option.id)}
+          >
+            {option.short}
+          </button>
+        </Tip>
       ))}
     </div>
   );

@@ -16,7 +16,8 @@
       "Bash(npm run *)",
       "Bash(node serve.mjs)",
       "Bash(npx vite *)",
-      "Bash(node --input-type=module -e ' *)"
+      "Bash(node --input-type=module -e ' *)",
+      "PowerShell(npm run build 2>&1)"
     ]
   }
 }

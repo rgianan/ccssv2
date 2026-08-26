@@ -625,7 +625,7 @@ td small {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(7, 33, 27, 0.58);
+  background: rgba(6, 18, 45, 0.58);
   display: grid;
   place-items: center;
   z-index: 40;

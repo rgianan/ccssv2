@@ -628,7 +628,7 @@ const blankService = {
   sort_order: "",
 };
 
-export function ServicesPanel({ onError }) {
+export function ServicesPanel({ onError, canSetFees = false }) {
   const [services, setServices] = useState([]),
     [form, setForm] = useState(blankService),
     [saving, setSaving] = useState(false),
@@ -754,6 +754,7 @@ export function ServicesPanel({ onError }) {
           <input
             type="checkbox"
             checked={form.has_fees}
+            disabled={!canSetFees}
             onChange={(event) =>
               setForm({ ...form, has_fees: event.target.checked })
             }
@@ -764,7 +765,9 @@ export function ServicesPanel({ onError }) {
           Only programs that charge a fee are asked SQD5 — “I paid a reasonable
           amount of fees for my transaction.” Everyone else is recorded as N/A,
           which the report excludes from every average rather than counting as
-          zero.
+          zero. Clients of a program that does charge one cannot answer N/A —
+          everybody who transacts there pays.
+          {!canSetFees && " Only a superadmin can change this."}
         </small>
         <button className="button primary" disabled={saving}>
           {saving ? "Saving…" : form.service_id ? "Update program" : "Add program"}

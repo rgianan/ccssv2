@@ -98,10 +98,17 @@ export function LanguageToggle({ language, onChange }) {
   return (
     <div className="language-toggle" role="group" aria-label="Form language">
       <Languages size={15} />
+      {/* aria-pressed, not a radiogroup: these read better as two independent
+          toggles than as one of two choices, and unlike the rating scale there
+          is no ordered set to move through. Without it the active language is
+          carried by a CSS class alone and a screen reader announces the two
+          buttons identically — in the one control that changes the language of
+          every question on the page. */}
       {LANGUAGES.map((option) => (
         <button
           key={option.id}
           type="button"
+          aria-pressed={language === option.id}
           className={language === option.id ? "active" : ""}
           onClick={() => onChange(option.id)}
           title={`Show the form in ${option.label}`}

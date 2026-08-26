@@ -267,7 +267,9 @@ export function AdminDashboard() {
         {tab === "reports" && (
           <ReportsPanel period={period} onError={handleError} />
         )}
-        {tab === "services" && <ServicesPanel onError={handleError} />}
+        {tab === "services" && (
+          <ServicesPanel onError={handleError} canSetFees={isSuperadmin} />
+        )}
         {tab === "settings" && (
           <SettingsPanel onError={handleError} canSign={isSuperadmin} />
         )}

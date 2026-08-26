@@ -164,7 +164,7 @@
 .hero-scale-option.picked {
   background: var(--blue);
   border-color: var(--blue);
-  box-shadow: 0 10px 22px rgba(11, 75, 60, 0.22);
+  box-shadow: 0 10px 22px rgba(0, 50, 160, 0.22);
 }
 .hero-scale-option.picked small {
   color: #d0e2f5;
@@ -359,7 +359,7 @@
   color: #323947;
   border-radius: 14px;
   padding: 28px 26px;
-  box-shadow: 0 30px 60px rgba(3, 27, 20, 0.34);
+  box-shadow: 0 30px 60px rgba(2, 14, 38, 0.34);
   transform: rotate(1.2deg);
 }
 .coa-preview header {

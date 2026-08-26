@@ -116,21 +116,31 @@ function SqdRating({ question, value, onChange, language }) {
         <span className="sqd-number">{question.number}</span>
         <Bilingual entry={question} language={language} />
       </legend>
+      {/* Real radios inside the fieldset, the same pattern ChoiceGroup uses.
+          These were styled buttons, which look identical but tell assistive
+          technology nothing: every option announced the same whether or not it
+          was the one chosen, because the selection lived only in a CSS class.
+          Native radios carry the checked state, the "3 of 5" position and
+          arrow-key movement without any of it being hand-written. */}
       <div className="sqd-scale">
         {SQD_SCALE.map((option) => (
-          <button
+          <label
             key={option.value}
-            type="button"
-            className={value === option.value ? "selected" : ""}
-            onClick={() => onChange(option.value)}
-            aria-label={`${question.number}: ${t(option, language)}`}
+            className={`sqd-option${value === option.value ? " selected" : ""}`}
             title={t(option, language)}
           >
+            <input
+              type="radio"
+              name={question.id}
+              value={option.value}
+              checked={value === option.value}
+              onChange={() => onChange(option.value)}
+            />
             <span className="sqd-emoji" aria-hidden="true">
               {option.emoji}
             </span>
             <small>{t(option, language)}</small>
-          </button>
+          </label>
         ))}
       </div>
     </fieldset>
@@ -145,6 +155,10 @@ export function SurveyForm() {
     [cc, setCc] = useState({}),
     [sqd, setSqd] = useState({}),
     [busy, setBusy] = useState(false),
+    // The service id the backend has told us charges a fee. Set only by the
+    // SQD5_REQUIRED path below, and tied to a service so choosing a different
+    // program clears it rather than carrying the demand across.
+    [feesRequiredFor, setFeesRequiredFor] = useState(""),
     [done, setDone] = useState(null),
     [error, setError] = useState(""),
     [turnstileToken, setTurnstileToken] = useState(""),
@@ -167,6 +181,21 @@ export function SurveyForm() {
   const selectedService = services.find((s) => s.service_id === form.serviceId);
   const isOtherService = selectedService?.code === OTHER_SERVICE_CODE;
   const wantsCoa = form.wantsCoa === "yes";
+
+  /**
+   * The service as the backend currently sees it. When it has refused a
+   * submission because SQD5 is now required, that refusal is authoritative —
+   * it read the Services sheet directly, while this copy of the list came from
+   * a cache. Everything that depends on the fees flag reads this instead of
+   * `selectedService`, so the question appears even if the refetch that
+   * follows the refusal fails. Without it a client whose refetch failed is
+   * asked for an answer to a question that is not on screen, and every further
+   * Submit repeats the same refusal.
+   */
+  const ratedService =
+    selectedService && feesRequiredFor === selectedService.service_id
+      ? { ...selectedService, has_fees: true }
+      : selectedService;
 
   const serviceOptions = useMemo(
     () =>
@@ -200,11 +229,11 @@ export function SurveyForm() {
       );
     if (step === 2) return ccApplicable(cc).every((question) => cc[question.id]);
     if (step === 3)
-      return sqdApplicable(selectedService).every((question) => sqd[question.id]);
+      return sqdApplicable(ratedService).every((question) => sqd[question.id]);
     return true;
-    // selectedService matters here: which SQD questions are required depends
-    // on it, and it resolves only once the service list has loaded.
-  }, [step, form, cc, sqd, wantsCoa, isOtherService, selectedService]);
+    // ratedService matters here: which SQD questions are required depends on
+    // it, and it resolves only once the service list has loaded.
+  }, [step, form, cc, sqd, wantsCoa, isOtherService, ratedService]);
 
   // Two clicks landing in the same tick share one render's closure, so both
   // would advance. Comparing against the step the click was made on makes the
@@ -247,7 +276,7 @@ export function SurveyForm() {
         serviceCode: selectedService?.code || "",
         serviceName: selectedService?.name_en || "",
         ...ccAnswers(cc),
-        ...sqdAnswers(sqd, selectedService),
+        ...sqdAnswers(sqd, ratedService),
       };
       const result = await submitResponse(
         { ...answers, submissionId: `${submissionId}-${fingerprint(answers)}` },
@@ -260,6 +289,11 @@ export function SurveyForm() {
         // further Submit repeats the same refusal. Fetch the service list
         // again and take them back to the question instead.
         if (result.code === "SQD5_REQUIRED") {
+          // Recorded first and independently of the refetch. The refetch is
+          // the tidier path — it picks up any other change to the service at
+          // the same time — but it can fail, and the question has to appear
+          // either way or this branch strands the client it exists to rescue.
+          setFeesRequiredFor(form.serviceId);
           await loadServices().catch(() => {});
           setSqd((state) => ({ ...state, sqd5: "" }));
           setStep(3);
@@ -342,6 +376,7 @@ export function SurveyForm() {
                 setForm(createEmptyForm());
                 setCc({});
                 setSqd({});
+                setFeesRequiredFor("");
                 setTurnstileToken("");
                 setTurnstileReset((value) => value + 1);
               }}
@@ -369,7 +404,9 @@ export function SurveyForm() {
             title="Verify an issued Certificate of Appearance"
           >
             <BadgeCheck size={17} />
-            {language === "tl" ? "Beripikahin" : "Verify"}
+            <span className="topbar-link-label">
+              {language === "tl" ? "Beripikahin" : "Verify"}
+            </span>
           </a>
         </div>
       </header>
@@ -750,15 +787,7 @@ export function SurveyForm() {
                     <p>{t(COPY.sqdIntro, language)}</p>
                   </div>
                 </div>
-                <div className="scale-legend">
-                  {SQD_SCALE.map((option) => (
-                    <span key={option.value}>
-                      <b aria-hidden="true">{option.emoji}</b>
-                      {t(option, language)}
-                    </span>
-                  ))}
-                </div>
-                {!selectedService?.has_fees && (
+                {!ratedService?.has_fees && (
                   <div className="notice">
                     <Info size={15} />
                     {language === "tl"
@@ -766,7 +795,7 @@ export function SurveyForm() {
                       : "This service carries no fee, so the question about fees is not asked."}
                   </div>
                 )}
-                {sqdApplicable(selectedService).map((question) => (
+                {sqdApplicable(ratedService).map((question) => (
                   <SqdRating
                     key={question.id}
                     question={question}

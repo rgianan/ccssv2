@@ -635,7 +635,7 @@ function adminGetServices(adminToken) {
 }
 
 function adminSaveService(payload, adminToken) {
-  requireAdmin_(adminToken);
+  var session = requireAdmin_(adminToken);
   var code = safeTrim_(payload.code).toUpperCase(),
       nameEn = safeTrim_(payload.name_en),
       nameTl = safeTrim_(payload.name_tl),
@@ -673,6 +673,16 @@ function adminSaveService(payload, adminToken) {
     var hasFees = 'has_fees' in payload
       ? (payload.has_fees === true || String(payload.has_fees).toLowerCase() === 'true')
       : (current ? current.has_fees === true : false);
+
+    // Changing the flag decides whether SQD5 is asked at all and therefore
+    // which respondents count toward the Costs dimension of a filed report —
+    // the same weight as the certificate signatory, which is already held to
+    // superadmin. Only a change is held to it: an ordinary admin can still
+    // rename a program or take it off the form without being blocked by a
+    // field they are not touching.
+    if (hasFees !== (current ? current.has_fees === true : false) &&
+        safeTrim_(session.role).toLowerCase() !== 'superadmin')
+      throw new Error('Only a superadmin can change whether a program charges a fee.');
 
     values[hdr['service_id']] = serviceId;
     values[hdr['code']] = safeSheetValue_(code);
@@ -797,8 +807,16 @@ function submitResponse(formData) {
   var transactionDate = parseDate_(formData.transactionDate);
   if (!transactionDate) return { status: 'BAD_REQUEST', message: 'A valid transaction date is required.' };
 
+  // Checked against the official list rather than merely for being non-empty.
+  // The report counts by region code and regionCode_ maps anything unrecognised
+  // to N/A, so a value from outside the list was stored and then dropped out of
+  // the region table with nothing in the workbook to show a respondent had gone
+  // missing. This is also what bounds the field: only a listed name gets in, so
+  // it needs no separate length cap.
   var region = safeTrim_(formData.region);
   if (!region) return { status: 'BAD_REQUEST', message: 'Region of residence is required.' };
+  if (regionCode_(region) === 'N/A')
+    return { status: 'BAD_REQUEST', message: 'Please choose your region of residence from the list.' };
 
   var service = readServices_().filter(function (entry) {
     return entry.service_id === safeTrim_(formData.serviceId) && entry.active;

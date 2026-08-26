@@ -90,6 +90,17 @@ export default async function handler(req, res) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload))
       return send(res, 400, { ok: false, error: "Invalid JSON request." });
 
+    // Read before the Turnstile check, which needs the hostname out of it.
+    const portalBaseUrl = String(process.env.PORTAL_BASE_URL || "")
+      .trim()
+      .replace(/\/+$/, "");
+    if (portalBaseUrl && !/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(portalBaseUrl))
+      return send(res, 500, {
+        ok: false,
+        error:
+          "PORTAL_BASE_URL is malformed. Set it to the portal origin, for example https://csm.ched.gov.ph — no path, no trailing slash.",
+      });
+
     const protectedActions = {
       submitResponse: "client_submit",
       adminLogin: "admin_login",
@@ -133,7 +144,18 @@ export default async function handler(req, res) {
         },
       ).then((response) => response.json());
 
-      const expectedHostname = String(req.headers.host || "").split(":")[0];
+      // Cloudflare reports the hostname that solved the challenge; comparing it
+      // to the configured origin is what ties a token to this portal. That
+      // comparison is only worth making against a value the caller cannot
+      // choose — deriving it from the Host header, as this did, let the request
+      // supply both sides of its own check. PORTAL_BASE_URL is the same value
+      // the certificate links are built from, and it is set on the server.
+      // Where it is unset there is nothing trustworthy to compare against, so
+      // the check is skipped rather than performed against the request's own
+      // header; Turnstile site keys are domain-locked in Cloudflare regardless.
+      const expectedHostname = portalBaseUrl
+        ? new URL(portalBaseUrl).hostname
+        : "";
       if (
         !verification.success ||
         verification.action !== expectedAction ||
@@ -155,18 +177,7 @@ export default async function handler(req, res) {
     // single unauthenticated call was enough to redirect verification to an
     // attacker's domain permanently. An unset variable now sends nothing and
     // the backend keeps what it already has.
-    const portalBaseUrl = String(process.env.PORTAL_BASE_URL || "")
-      .trim()
-      .replace(/\/+$/, "");
-    if (portalBaseUrl) {
-      if (!/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(portalBaseUrl))
-        return send(res, 500, {
-          ok: false,
-          error:
-            "PORTAL_BASE_URL is malformed. Set it to the portal origin, for example https://csm.ched.gov.ph — no path, no trailing slash.",
-        });
-      payload.portalBaseUrl = portalBaseUrl;
-    }
+    if (portalBaseUrl) payload.portalBaseUrl = portalBaseUrl;
     payload.requestContext = {
       requestId: String(req.headers["x-vercel-id"] || "").slice(0, 100),
     };
@@ -195,3 +206,7 @@ export default async function handler(req, res) {
     });
   }
 }
+
+/* Named alongside the default export so tests exercise this module rather than
+   a copy of it. Vercel invokes the default export and ignores these. */
+export { idempotencyKey, replayScopeFor };

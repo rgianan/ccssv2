@@ -120,7 +120,7 @@ code {
 .button.primary {
   background: var(--blue);
   color: #fff;
-  box-shadow: 0 9px 20px rgba(11, 75, 60, 0.18);
+  box-shadow: 0 9px 20px rgba(0, 50, 160, 0.18);
 }
 .button.primary:hover:not(:disabled) {
   background: var(--blue-deep);
@@ -288,6 +288,23 @@ code {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: none;
+}
+/* The bar is a fixed-height row that never wraps, so anything that cannot
+   shrink pushes the page wider than the viewport. Letting the brand give way
+   keeps the page from scrolling sideways at any width; the narrow rules below
+   drop the parts that matter least before it ever has to. */
+.topbar .brand {
+  min-width: 0;
+}
+.topbar .brand span {
+  min-width: 0;
+}
+.topbar .brand strong,
+.topbar .brand small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topbar-link {
   font-weight: 700;
@@ -332,7 +349,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: #5b7eae;
-  box-shadow: 0 0 0 3px rgba(74, 139, 115, 0.13);
+  box-shadow: 0 0 0 3px rgba(0, 50, 160, 0.15);
 }
 input:disabled,
 select:disabled {
@@ -412,5 +429,52 @@ textarea {
   .field-grid,
   .field-grid.narrow {
     grid-template-columns: 1fr;
+  }
+}
+
+/* At phone widths the office subtitle and the Verify wording are the least
+   load-bearing things in the bar — the logo and the icon still say what they
+   are. Dropping them leaves room for the language toggle, which a bilingual
+   form cannot do without. */
+@media (max-width: 460px) {
+  .topbar {
+    padding: 0 14px;
+    gap: 10px;
+  }
+  .topbar .brand small {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 8px;
+  }
+  .topbar-link {
+    padding: 8px 10px;
+  }
+}
+/* At the narrowest supported width the brand still runs ~15px past its box and
+   truncates to "CHED · OS…", which reads as a broken name rather than a short
+   one. The wording is the only thing here that cannot be abbreviated, so the
+   room comes out of padding and the logo instead. */
+@media (max-width: 380px) {
+  .topbar-link-label {
+    display: none;
+  }
+  .topbar {
+    padding: 0 12px;
+  }
+  .topbar .brand {
+    gap: 8px;
+  }
+  .topbar .brand img {
+    height: 32px;
+  }
+  .topbar .language-toggle {
+    padding: 3px 5px 3px 7px;
+  }
+  .topbar .language-toggle button {
+    padding: 4px 7px;
+  }
+  .topbar-link {
+    padding: 8px;
   }
 }

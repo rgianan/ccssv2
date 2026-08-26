@@ -102,7 +102,10 @@
   gap: 10px;
   align-items: center;
 }
-.admin-profile > span {
+/* The initials avatar — and only that. The sign-out button beside it is
+   wrapped in a tooltip, which is also a direct child span, and without the
+   exclusion it was given the avatar's gold disc. */
+.admin-profile > span:not(.tip) {
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -152,6 +155,12 @@
   padding: 40px 44px 70px;
   max-width: 1560px;
   width: 100%;
+  /* A grid item defaults to min-width:auto, so it refuses to shrink below the
+     widest thing inside it. The response table is far wider than the window
+     and scrolls inside its own container, but that container's contribution
+     still stretched this column past the viewport and made the whole page
+     scroll sideways. Zero lets the column stay put and the table scroll. */
+  min-width: 0;
 }
 .admin-main > header {
   display: flex;
@@ -219,11 +228,15 @@
   border-radius: 15px;
   position: relative;
 }
-.stats span,
+/* Excluding the tooltip's own spans deliberately. A Tip renders a wrapper span
+   and a bubble span, and a bare `.stats span` claimed both — the 46px gutter
+   meant for the label text was applied to the wrapper, pushing the icon it
+   holds a further 46px in from the corner it is positioned against. */
+.stats span:not(.tip):not(.tip-bubble),
 .stats strong {
   display: block;
 }
-.stats span {
+.stats span:not(.tip):not(.tip-bubble) {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
@@ -249,6 +262,18 @@
   height: 38px;
   display: grid;
   place-items: center;
+}
+/* The icon carries a tooltip, and a Tip wraps its trigger in a positioned
+   span. Left alone that span becomes the icon's containing block and the icon
+   drops back into the flow. Positioning the wrapper instead keeps the icon
+   where it was and gives the bubble the right thing to point at. */
+.stats article > .tip {
+  position: absolute;
+  right: 18px;
+  top: 19px;
+}
+.stats article > .tip > i {
+  position: static;
 }
 .stats i svg {
   width: 18px;
@@ -535,6 +560,51 @@ td small {
 .status-pill.disabled {
   background: #eef0f3;
   color: #7f8792;
+}
+/* Carries a tooltip, so it has to be reachable without a mouse. */
+.status-pill[tabindex],
+.th-help {
+  cursor: help;
+}
+.th-help {
+  border-bottom: 1px dotted currentColor;
+}
+.status-pill[tabindex]:focus-visible,
+.th-help:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* --------------------------- Refreshing in place -------------------------- */
+
+/* A panel that already has content keeps showing it while the next request is
+   in flight. Dimming says "this is being replaced" without taking the figures
+   away and without moving anything, which is what a skeleton here would do.
+   Pointer events stay off so nothing is clicked against stale data. */
+.is-refreshing {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-refreshing {
+    transition: none;
+  }
+}
+
+/* Figures line up on the decimal instead of drifting with the glyph widths. */
+td.numeric,
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A row shown before the server has confirmed it. Tinted rather than dimmed —
+   dimming reads as disabled, and this row is real, just not yet acknowledged. */
+.row-pending > td {
+  background: #f4f8fe;
+}
+.row-pending > td:first-child {
+  box-shadow: inset 3px 0 0 var(--azure);
 }
 
 /* ------------------------------- Bar charts ------------------------------- */

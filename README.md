@@ -94,6 +94,29 @@ runs `vercel dev` so `/api/gas-proxy` is served alongside the app.
 Drive folders for certificate templates, issued certificates, and generated
 reports are created automatically on first use and remembered in `Settings`.
 
+### Starting clean before the first real quarter
+
+Testing leaves real rows behind, and they would otherwise be counted in the
+first filed report. Two functions handle that, both run from the Apps Script
+editor and neither reachable through the web app — no administrator signed in
+through the portal can trigger them, whatever their role.
+
+1. Run `previewCsmDataReset()` and read the execution log. It reports how many
+   rows each sheet would lose and changes nothing.
+2. To go ahead, edit `resetCsmData()`, replace `CHANGE_THIS_TO_CONFIRM` with
+   `RESET`, and run it. Without that edit it refuses.
+
+It empties `Responses`, `ServiceStats`, `Reports`, and `Audit`. It leaves
+`Services`, `Settings`, `Users`, and `Whitelist` alone — the program list, the
+signatory block, and the accounts are configuration, not collected data — and
+it leaves the security secrets alone, so the Vercel proxy keeps working and
+nobody is signed out. The emptied audit log opens with a single `DATA_RESET`
+entry recording who ran it, and the audit hash chain is re-rooted on it so a
+fresh portal does not report a broken chain.
+
+Certificates and report workbooks already in Drive are **not** touched. Bin the
+trial ones by hand from the Drive folders named in `Settings`.
+
 ## Deploy the front end (Vercel)
 
 Import the repository as a new Vercel project. `vercel.json` supplies the build
@@ -124,8 +147,12 @@ but the same token cannot be replayed against a different one.
 and it is **required** — set it to the portal origin with no path and no
 trailing slash, for example `https://csm.ched.gov.ph`. The proxy forwards only
 this configured value and never the request's `Host` header, so a spoofed host
-cannot repoint verification at another domain. Until it is set, certificates
-are issued without a QR code or verification link and the admin module says so.
+cannot repoint verification at another domain. It is also the hostname the
+Turnstile check compares against, for the same reason: an expected value taken
+from the request lets the caller supply both sides of its own check. Until it
+is set, certificates are issued without a QR code or verification link, the
+admin module says so, and the Turnstile hostname comparison is skipped rather
+than made against the request's own header.
 
 ## Certificate of Appearance
 

@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  cacheKeys,
   generateCoa,
   generateReport,
   getAdminAuditLog,
@@ -26,11 +27,19 @@ import {
   saveAdminUser,
   saveCoaDetails,
   saveServiceStats,
+  seedCache,
   uploadCoaTemplate,
   uploadSignature,
 } from "../lib/api";
 import { COURTESY_TITLES, OTHER_SERVICE_CODE } from "../lib/csm";
 import { describePeriod } from "./PeriodPicker";
+import {
+  Skeleton,
+  SkeletonLines,
+  SkeletonRegion,
+  SkeletonTable,
+  Tip,
+} from "./ui";
 
 /** Shared notice strip so every panel reports success and failure the same way. */
 function Feedback({ error, notice }) {
@@ -87,6 +96,16 @@ const clearIssueKey = (referenceId) => {
   }
 };
 
+/** Named once, so the placeholder table and the real one cannot drift apart. */
+const COA_COLUMNS = [
+  "Client",
+  "Agency",
+  "Purpose",
+  "Date covered",
+  "Status",
+  "",
+];
+
 export function CertificatePanel({ onError }) {
   const [rows, setRows] = useState([]),
     [status, setStatus] = useState("REQUESTED"),
@@ -138,16 +157,33 @@ export function CertificatePanel({ onError }) {
     }
   }
 
+  /**
+   * Closes the dialog and shows the edited row straight away.
+   *
+   * These are the words that get printed on someone's certificate, so the
+   * person editing them wants to see the result, not a spinner. On failure the
+   * row goes back to what it was and the dialog reopens with the edit intact,
+   * so nothing typed is lost to a failed write.
+   */
   async function saveDetails(event) {
     event.preventDefault();
     setError("");
     setNotice("");
+    const draft = editing;
+    const previous = rows;
+    setRows((current) =>
+      current.map((row) =>
+        row.referenceId === draft.referenceId ? { ...row, ...draft } : row,
+      ),
+    );
+    setEditing(null);
     try {
-      await saveCoaDetails(editing);
+      await saveCoaDetails(draft);
       setNotice("Certificate details saved.");
-      setEditing(null);
       await load();
     } catch (saveError) {
+      setRows(previous);
+      setEditing(draft);
       setError(saveError.message);
     }
   }
@@ -181,17 +217,22 @@ export function CertificatePanel({ onError }) {
 
       <Feedback error={error} notice={notice} />
 
-      <div className="table-card">
+      {loading && !rows.length ? (
+        <SkeletonRegion
+          label="Loading certificate requests"
+          className="table-card"
+        >
+          <SkeletonTable columns={COA_COLUMNS} rows={5} />
+        </SkeletonRegion>
+      ) : (
+      <div className={`table-card${loading ? " is-refreshing" : ""}`}>
         <div className="table-scroll">
           <table>
             <thead>
               <tr>
-                <th>Client</th>
-                <th>Agency</th>
-                <th>Purpose</th>
-                <th>Date covered</th>
-                <th>Status</th>
-                <th />
+                {COA_COLUMNS.map((column, index) => (
+                  <th key={index}>{column}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -268,6 +309,7 @@ export function CertificatePanel({ onError }) {
           </table>
         </div>
       </div>
+      )}
 
       {editing && (
         <div className="modal-backdrop" onClick={() => setEditing(null)}>
@@ -446,7 +488,34 @@ export function ReportsPanel({ period, onError }) {
     }
   }
 
-  if (loading) return <section className="panel-loading">Loading report inputs…</section>;
+  if (loading)
+    return (
+      <SkeletonRegion label="Loading report inputs" className="stacked">
+        <article className="panel">
+          <div className="panel-head">
+            <div>
+              <Skeleton width={196} height={16} />
+              <Skeleton
+                width={300}
+                height={11}
+                style={{ display: "block", marginTop: 9 }}
+              />
+            </div>
+            <Skeleton width={150} height={40} radius={11} />
+          </div>
+          <SkeletonTable
+            columns={["Program", "Clients", "Transactions"]}
+            rows={5}
+          />
+        </article>
+        <article className="panel">
+          <div className="panel-head">
+            <Skeleton width={168} height={16} />
+          </div>
+          <SkeletonTable columns={["Report", "Period", "Generated", ""]} rows={3} />
+        </article>
+      </SkeletonRegion>
+    );
 
   return (
     <section className="stacked">
@@ -628,31 +697,63 @@ const blankService = {
   sort_order: "",
 };
 
-export function ServicesPanel({ onError, canSetFees = false }) {
+export function ServicesPanel({ onError }) {
   const [services, setServices] = useState([]),
+    [loading, setLoading] = useState(true),
     [form, setForm] = useState(blankService),
     [saving, setSaving] = useState(false),
+    [pendingId, setPendingId] = useState(""),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
 
   const load = () => getAdminServices().then(setServices).catch(onError);
   useEffect(() => {
-    load();
+    load().finally(() => setLoading(false));
   }, []);
 
+  /**
+   * Shows the change in the list before the server has confirmed it.
+   *
+   * Apps Script takes about a second to write and another to read back, so
+   * this used to be: press Add, watch an unchanged list, wait, watch it
+   * change. The row now appears at once and is marked as still saving. If the
+   * write fails the list is put back exactly as it was and the form is
+   * refilled, so nothing is lost and nothing pretends to have been saved.
+   */
   async function save(event) {
     event.preventDefault();
     setSaving(true);
     setError("");
     setNotice("");
+
+    const previous = services;
+    const draft = form;
+    // A provisional id for a new row, replaced by the real one on confirmation.
+    const optimisticId = draft.service_id || `pending-${Date.now()}`;
+    const optimistic = { ...draft, service_id: optimisticId };
+    setServices((current) =>
+      current.some((service) => service.service_id === optimisticId)
+        ? current.map((service) =>
+            service.service_id === optimisticId ? optimistic : service,
+          )
+        : [...current, optimistic],
+    );
+    setPendingId(optimisticId);
+    setForm(blankService);
+
     try {
-      await saveAdminService(form);
-      setNotice(form.service_id ? "Program updated." : "Program added.");
-      setForm(blankService);
+      await saveAdminService(draft);
+      setNotice(draft.service_id ? "Program updated." : "Program added.");
+      // Read back rather than patching the provisional row in place: the
+      // server assigns the id and the sort order, and the list is ordered by
+      // the latter.
       await load();
     } catch (saveError) {
+      setServices(previous);
+      setForm(draft);
       setError(saveError.message);
     } finally {
+      setPendingId("");
       setSaving(false);
     }
   }
@@ -754,7 +855,6 @@ export function ServicesPanel({ onError, canSetFees = false }) {
           <input
             type="checkbox"
             checked={form.has_fees}
-            disabled={!canSetFees}
             onChange={(event) =>
               setForm({ ...form, has_fees: event.target.checked })
             }
@@ -767,7 +867,6 @@ export function ServicesPanel({ onError, canSetFees = false }) {
           which the report excludes from every average rather than counting as
           zero. Clients of a program that does charge one cannot answer N/A —
           everybody who transacts there pays.
-          {!canSetFees && " Only a superadmin can change this."}
         </small>
         <button className="button primary" disabled={saving}>
           {saving ? "Saving…" : form.service_id ? "Update program" : "Add program"}
@@ -778,57 +877,94 @@ export function ServicesPanel({ onError, canSetFees = false }) {
         <div className="panel-head">
           <div>
             <h2>Configured programs</h2>
-            <p>{services.length} entries</p>
+            <p>
+              {loading
+                ? "Loading…"
+                : `${services.length} ${services.length === 1 ? "entry" : "entries"}`}
+            </p>
           </div>
         </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Program</th>
-                <th>Category</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {services.map((service) => (
-                <tr key={service.service_id}>
-                  <td>
-                    <strong>{service.code}</strong>
-                    <small>{service.name_en}</small>
-                  </td>
-                  <td>
-                    {service.category === "main" ? "Main program" : "Other"}
-                    {service.has_fees && <small>Charges a fee</small>}
-                  </td>
-                  <td>
-                    <span
-                      className={`status-pill ${service.active ? "enabled" : "disabled"}`}
-                    >
-                      {service.active ? "Active" : "Hidden"}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      className="mini-button"
-                      onClick={() =>
-                        setForm({
-                          ...service,
-                          has_fees: service.has_fees === true,
-                          sort_order: service.sort_order ?? "",
-                        })
-                      }
-                      title={`Edit ${service.code}`}
-                    >
-                      Edit
-                    </button>
-                  </td>
+        {loading ? (
+          <SkeletonTable
+            columns={["Program", "Category", "Status", ""]}
+            rows={5}
+          />
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Program</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {services.map((service) => {
+                  const pending = service.service_id === pendingId;
+                  return (
+                    <tr
+                      key={service.service_id}
+                      className={pending ? "row-pending" : ""}
+                    >
+                      <td>
+                        <strong>{service.code}</strong>
+                        <small>{service.name_en}</small>
+                      </td>
+                      <td>
+                        {service.category === "main" ? "Main program" : "Other"}
+                        {service.has_fees && <small>Charges a fee</small>}
+                      </td>
+                      <td>
+                        {pending ? (
+                          <span className="status-pill pending">Saving…</span>
+                        ) : (
+                          <Tip
+                            text={
+                              service.active
+                                ? "Offered on the client form."
+                                : "Hidden from the client form. Existing responses keep it."
+                            }
+                          >
+                            <span
+                              tabIndex={0}
+                              className={`status-pill ${service.active ? "enabled" : "disabled"}`}
+                            >
+                              {service.active ? "Active" : "Hidden"}
+                            </span>
+                          </Tip>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="mini-button"
+                          disabled={pending}
+                          onClick={() =>
+                            setForm({
+                              ...service,
+                              has_fees: service.has_fees === true,
+                              sort_order: service.sort_order ?? "",
+                            })
+                          }
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!services.length && (
+                  <tr>
+                    <td colSpan={4} className="empty-cell">
+                      No programs configured yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </section>
   );
@@ -836,16 +972,22 @@ export function ServicesPanel({ onError, canSetFees = false }) {
 
 // -------------------------------- Settings -----------------------------------
 
+/**
+ * No placeholder text. These held named members of staff as examples, which put
+ * real people's names into every empty field — an unset signatory read as a set
+ * one at a glance, and the wrong name would have gone unnoticed until it was
+ * printed on a certificate. The labels already say what each field is.
+ */
 const SETTING_FIELDS = [
-  ["office_name", "Office name", "Office of Student Development and Services (OSDS)"],
-  ["coa_signatory", "Certificate signatory", "Corinna Frances O. Cabanilla, CESO III"],
-  ["coa_designation", "Signatory designation", "Director IV, OSDS"],
-  ["report_prepared_by", "Report prepared by", "Timothy Paul R. Malitao"],
-  ["report_prepared_title", "Prepared by — position", "PTS I, OSDS"],
-  ["report_reviewed_by", "Report reviewed by", "Rita P. Sescar"],
-  ["report_reviewed_title", "Reviewed by — position", "Chief EPS, OSDS"],
-  ["report_approved_by", "Report approved by", "Corinna Frances O. Cabanilla, CESO III"],
-  ["report_approved_title", "Approved by — position", "Director IV, OSDS"],
+  ["office_name", "Office name"],
+  ["coa_signatory", "Certificate signatory"],
+  ["coa_designation", "Signatory designation"],
+  ["report_prepared_by", "Report prepared by"],
+  ["report_prepared_title", "Prepared by — position"],
+  ["report_reviewed_by", "Report reviewed by"],
+  ["report_reviewed_title", "Reviewed by — position"],
+  ["report_approved_by", "Report approved by"],
+  ["report_approved_title", "Approved by — position"],
 ];
 
 /** Whose name signs a certificate, and the files it is built from. */
@@ -871,10 +1013,18 @@ export function SettingsPanel({ onError, canSign = false }) {
     setSaving(true);
     setError("");
     setNotice("");
+    // What is on screen is already what was typed, so there is nothing to
+    // render optimistically — but the previous values are kept so a failure
+    // can put them back rather than leaving the form showing values the
+    // server rejected as though they had been accepted.
+    const previous = settings;
     try {
-      setSettings(await saveAdminSettings(settings));
+      const stored = await saveAdminSettings(settings);
+      setSettings(stored);
+      seedCache(cacheKeys.settings, stored);
       setNotice("Settings saved.");
     } catch (saveError) {
+      setSettings(previous);
       setError(saveError.message);
     } finally {
       setSaving(false);
@@ -897,7 +1047,9 @@ export function SettingsPanel({ onError, canSign = false }) {
         [kind === "template" ? "coa_template_name" : "coa_signature_name"]:
           result.name,
       };
-      setSettings(await saveAdminSettings(next));
+      const stored = await saveAdminSettings(next);
+      setSettings(stored);
+      seedCache(cacheKeys.settings, stored);
       setNotice(`${result.name} uploaded.`);
     } catch (uploadError) {
       setError(uploadError.message);
@@ -906,7 +1058,42 @@ export function SettingsPanel({ onError, canSign = false }) {
     }
   }
 
-  if (loading) return <section className="panel-loading">Loading settings…</section>;
+  if (loading)
+    return (
+      <SkeletonRegion label="Loading office settings" className="stacked">
+        <article className="panel">
+          <div className="panel-head">
+            <div>
+              <Skeleton width={186} height={16} />
+              <Skeleton
+                width={330}
+                height={11}
+                style={{ display: "block", marginTop: 9 }}
+              />
+            </div>
+            <Skeleton width={124} height={40} radius={11} />
+          </div>
+          <div className="settings-grid">
+            {Array.from({ length: 9 }, (_, index) => (
+              <div key={index}>
+                <Skeleton width="52%" height={11} />
+                <Skeleton
+                  height={44}
+                  radius={11}
+                  style={{ display: "block", marginTop: 8, width: "100%" }}
+                />
+              </div>
+            ))}
+          </div>
+        </article>
+        <article className="panel">
+          <div className="panel-head">
+            <Skeleton width={210} height={16} />
+          </div>
+          <SkeletonLines lines={3} />
+        </article>
+      </SkeletonRegion>
+    );
 
   return (
     <form className="stacked" onSubmit={save}>
@@ -925,7 +1112,7 @@ export function SettingsPanel({ onError, canSign = false }) {
           </button>
         </div>
         <div className="settings-grid">
-          {SETTING_FIELDS.map(([key, label, placeholder]) => {
+          {SETTING_FIELDS.map(([key, label]) => {
             const locked = SIGNING_FIELDS.includes(key) && !canSign;
             return (
               <label key={key}>
@@ -936,7 +1123,6 @@ export function SettingsPanel({ onError, canSign = false }) {
                   onChange={(event) =>
                     setSettings({ ...settings, [key]: event.target.value })
                   }
-                  placeholder={placeholder}
                 />
                 {locked && <small>Only a superadmin can change this.</small>}
               </label>
@@ -1017,14 +1203,18 @@ const blankUser = {
 
 export function UsersPanel({ onError }) {
   const [users, setUsers] = useState([]),
+    [loading, setLoading] = useState(true),
     [form, setForm] = useState(blankUser),
     [saving, setSaving] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
   const load = () => getAdminUsers().then(setUsers).catch(onError);
   useEffect(() => {
-    load();
+    load().finally(() => setLoading(false));
   }, []);
+  // Deliberately not optimistic. Everywhere else an optimistic row that fails
+  // to save is an inconvenience; here it would show an account as created,
+  // or as deactivated, when it is neither — and someone would act on that.
   async function save(event) {
     event.preventDefault();
     setSaving(true);
@@ -1121,9 +1311,19 @@ export function UsersPanel({ onError }) {
         <div className="panel-head">
           <div>
             <h2>Administrator accounts</h2>
-            <p>{users.length} accounts</p>
+            <p>
+              {loading
+                ? "Loading…"
+                : `${users.length} ${users.length === 1 ? "account" : "accounts"}`}
+            </p>
           </div>
         </div>
+        {loading ? (
+          <SkeletonTable
+            columns={["User", "Role", "Status", "Updated", ""]}
+            rows={4}
+          />
+        ) : (
         <div className="table-scroll">
           <table>
             <thead>
@@ -1169,6 +1369,7 @@ export function UsersPanel({ onError }) {
             </tbody>
           </table>
         </div>
+        )}
       </section>
     </section>
   );

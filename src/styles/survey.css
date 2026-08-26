@@ -201,6 +201,17 @@
 .other-service {
   margin: 12px 0 0;
 }
+/* Same box as a real choice, so the list does not resize when the programmes
+   arrive. Not interactive, so it takes none of the hover or cursor treatment. */
+.choice-skeleton {
+  cursor: default;
+  align-items: center;
+  gap: 11px;
+}
+.choice-skeleton:hover {
+  border-color: #e1e8ee;
+  background: #fff;
+}
 
 .sqd-number {
   flex: none;

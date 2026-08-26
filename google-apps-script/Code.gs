@@ -509,6 +509,124 @@ function logSubmitSharedToken() {
   Logger.log(JSON.stringify(setupCsmSecurity(), null, 2));
 }
 
+// ------------------------------- Data reset -----------------------------------
+
+/**
+ * The sheets a reset empties, and the ones it must not touch.
+ *
+ * Everything here is collected data. Services, Settings, Users and Whitelist
+ * are configuration — the office spends real effort on the program list, the
+ * signatory block and the accounts, and none of it is what "start clean" means.
+ * Naming both sets explicitly is deliberate: a reset written as "every sheet
+ * except these" quietly starts clearing anything added later.
+ */
+var RESET_DATA_SHEETS_ = [SHEET_RESPONSES, SHEET_SERVICE_STATS, SHEET_REPORTS, SHEET_AUDIT];
+var RESET_KEEPS_ = [SHEET_SERVICES, SHEET_SETTINGS, SHEET_USERS, SHEET_WHITELIST];
+
+/**
+ * What a reset would remove, without removing it.
+ *
+ * Run this first. It is the same walk resetCsmData() makes, so the counts it
+ * reports are the rows that would actually go.
+ */
+function previewCsmDataReset() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), counts = {}, total = 0;
+  RESET_DATA_SHEETS_.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    var rows = sheet && sheet.getLastRow() > 1 ? sheet.getLastRow() - 1 : 0;
+    counts[name] = sheet ? rows : 'sheet not created yet';
+    if (sheet) total += rows;
+  });
+  var result = {
+    wouldDelete: counts,
+    totalRows: total,
+    wouldKeep: RESET_KEEPS_,
+    note: 'Nothing has been changed. To go ahead, edit resetCsmData() as its comment describes and run it.'
+  };
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/**
+ * Empties the collected data so the portal can be handed over clean.
+ *
+ * Run once from the Apps Script editor, after setupCsmSheets(), when the trial
+ * responses gathered while testing should not be part of the first real
+ * quarter. It is deliberately not reachable through doPost: no administrator
+ * signed in through the portal can trigger it, whatever their role.
+ *
+ * To run it, replace CHANGE_THIS_TO_CONFIRM below with the word RESET and run
+ * the function. It refuses otherwise — the same guard seedUsers() uses, and for
+ * the same reason: an editor-run function is one misclick away from the Run
+ * button, and this one cannot be undone from here.
+ *
+ * Certificates and report workbooks already in Drive are left alone. They are
+ * outside this spreadsheet, a reset should not reach across into a Drive it was
+ * not asked about, and the trial ones are easy to find and bin by hand.
+ */
+function resetCsmData() {
+  var confirmation = 'CHANGE_THIS_TO_CONFIRM';
+  return resetCsmData_(confirmation);
+}
+
+function resetCsmData_(confirmation) {
+  if (safeTrim_(confirmation).toUpperCase() !== 'RESET')
+    throw new Error('Edit resetCsmData() and replace CHANGE_THIS_TO_CONFIRM with RESET before running it.');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000))
+    throw new Error('Another operation is running. Wait for it to finish, then run this again.');
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet(), cleared = {}, total = 0;
+    RESET_DATA_SHEETS_.forEach(function (name) {
+      var sheet = ss.getSheetByName(name);
+      if (!sheet) { cleared[name] = 'not created yet'; return; }
+      var rows = sheet.getLastRow() - 1;
+      // deleteRows, not clearContent: cleared cells still count towards
+      // getLastRow, so every later append would land below a block of blanks
+      // and every full-sheet read would page through them.
+      if (rows > 0) sheet.deleteRows(2, rows);
+      cleared[name] = rows > 0 ? rows : 0;
+      total += Math.max(0, rows);
+    });
+
+    // The audit log is a hash chain whose head lives in script properties, and
+    // adminGetAuditLog compares the two. Emptying the sheet and leaving the
+    // head behind reports a broken chain on a portal that has done nothing yet.
+    // The dropped-entry counters are part of that same report.
+    var props = PropertiesService.getScriptProperties();
+    ['AUDIT_HEAD_HASH', 'AUDIT_DROPPED_COUNT', 'AUDIT_DROPPED_LAST'].forEach(function (key) {
+      props.deleteProperty(key);
+    });
+
+    // The programme list is unchanged, but the public copy of it is cached and
+    // a reset is exactly when someone is watching the portal for a change.
+    invalidatePublicCache_();
+
+    // One entry, written after the clear, so the log opens with the reset that
+    // emptied it rather than with an unexplained gap.
+    try {
+      appendAuditForRequest_('csmDataReset', {}, true, '',
+        { email: safeTrim_(Session.getEffectiveUser().getEmail()).toLowerCase(), role: 'script' },
+        {});
+    } catch (auditError) {
+      console.error('Reset recorded no audit entry: ' + String(auditError && auditError.message || auditError));
+    }
+
+    var result = {
+      status: 'OK',
+      deletedRows: cleared,
+      totalRows: total,
+      kept: RESET_KEEPS_,
+      nextStep: 'Confirm the Programs list and the Settings signatory block are still as you want them, then submit one test response and delete its row.'
+    };
+    Logger.log(JSON.stringify(result, null, 2));
+    return result;
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 // -------------------------------- Settings -----------------------------------
 
 function ensureSettingsSheet_() {
@@ -635,7 +753,7 @@ function adminGetServices(adminToken) {
 }
 
 function adminSaveService(payload, adminToken) {
-  var session = requireAdmin_(adminToken);
+  requireAdmin_(adminToken);
   var code = safeTrim_(payload.code).toUpperCase(),
       nameEn = safeTrim_(payload.name_en),
       nameTl = safeTrim_(payload.name_tl),
@@ -673,16 +791,6 @@ function adminSaveService(payload, adminToken) {
     var hasFees = 'has_fees' in payload
       ? (payload.has_fees === true || String(payload.has_fees).toLowerCase() === 'true')
       : (current ? current.has_fees === true : false);
-
-    // Changing the flag decides whether SQD5 is asked at all and therefore
-    // which respondents count toward the Costs dimension of a filed report —
-    // the same weight as the certificate signatory, which is already held to
-    // superadmin. Only a change is held to it: an ordinary admin can still
-    // rename a program or take it off the form without being blocked by a
-    // field they are not touching.
-    if (hasFees !== (current ? current.has_fees === true : false) &&
-        safeTrim_(session.role).toLowerCase() !== 'superadmin')
-      throw new Error('Only a superadmin can change whether a program charges a fee.');
 
     values[hdr['service_id']] = serviceId;
     values[hdr['code']] = safeSheetValue_(code);
@@ -1721,7 +1829,10 @@ var AUDITED_ACTIONS_ = {
   adminSaveSettings: 'SETTINGS_SAVE', adminGenerateCoa: 'COA_GENERATE',
   adminSaveCoaDetails: 'COA_UPDATE', adminGenerateReport: 'REPORT_GENERATE',
   adminSaveServiceStats: 'SERVICE_STATS_SAVE', adminSaveUser: 'USER_SAVE',
-  adminUploadCoaTemplate: 'TEMPLATE_UPLOAD', adminUploadSignature: 'SIGNATURE_UPLOAD'
+  adminUploadCoaTemplate: 'TEMPLATE_UPLOAD', adminUploadSignature: 'SIGNATURE_UPLOAD',
+  // Not reachable through doPost — resetCsmData() records itself under this
+  // label so the emptied log opens with an explanation of why it is empty.
+  csmDataReset: 'DATA_RESET'
 };
 
 function isAuditedAction_(action) { return Object.prototype.hasOwnProperty.call(AUDITED_ACTIONS_, action); }

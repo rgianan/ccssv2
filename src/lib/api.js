@@ -25,8 +25,107 @@ export const readAdminSession = () => {
 };
 export const storeAdminSession = (session) =>
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-export const clearAdminSession = () => sessionStorage.removeItem(SESSION_KEY);
+export const clearAdminSession = () => {
+  sessionStorage.removeItem(SESSION_KEY);
+  // Nothing read under one account may survive into the next. The cache holds
+  // responses, certificate requests and the audit log — leaving it in place
+  // would hand the next person to sign in on this machine a view of data their
+  // own account might not be allowed to see.
+  clearCache();
+};
 const adminToken = () => readAdminSession()?.token || "";
+
+// ------------------------------- Read cache ----------------------------------
+
+/**
+ * Apps Script answers a read in roughly a second, so every tab switch used to
+ * cost one. The dashboard's reads are of things that change when an
+ * administrator changes them, and every one of those goes through this module,
+ * so a short-lived cache with explicit invalidation is safe: the entry that
+ * could go stale is dropped by the write that would have staled it.
+ *
+ * In memory only, and only for the life of the tab. Nothing here belongs in
+ * storage that outlives the session.
+ */
+const cacheStore = new Map();
+const inFlight = new Map();
+
+/** Long enough that flicking between tabs is instant, short enough that a
+ *  change made in another tab appears without a reload. */
+const READ_TTL_MS = 60_000;
+const CONFIG_TTL_MS = 10 * 60_000;
+
+/**
+ * Handed out as a copy. A cached array returned by reference becomes shared
+ * mutable state the moment a panel sorts or splices it, and the corruption
+ * surfaces later, somewhere else, as data that was never fetched that way.
+ */
+const copyOf = (value) =>
+  typeof structuredClone === "function"
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value ?? null));
+
+function cachedCall(key, ttl, run) {
+  const hit = cacheStore.get(key);
+  if (hit && Date.now() - hit.at < ttl) return Promise.resolve(copyOf(hit.value));
+  // Two panels mounting at once must not become two identical round trips.
+  const pending = inFlight.get(key);
+  if (pending) return pending.then(copyOf);
+  const request = run()
+    .then((value) => {
+      cacheStore.set(key, { at: Date.now(), value });
+      inFlight.delete(key);
+      return value;
+    })
+    .catch((error) => {
+      inFlight.delete(key);
+      throw error;
+    });
+  inFlight.set(key, request);
+  return request.then(copyOf);
+}
+
+/** Drops every entry whose key starts with any of these prefixes. */
+export const invalidate = (...prefixes) => {
+  for (const key of [...cacheStore.keys()])
+    if (prefixes.some((prefix) => key.startsWith(prefix))) cacheStore.delete(key);
+};
+
+/**
+ * Writes a value straight into the cache. Used after an optimistic update so
+ * that leaving a tab and coming back shows what the screen already showed,
+ * rather than briefly reverting to the version before the edit.
+ */
+export const seedCache = (key, value) =>
+  cacheStore.set(key, { at: Date.now(), value });
+
+export const clearCache = () => {
+  cacheStore.clear();
+  inFlight.clear();
+};
+
+/**
+ * Guarantees a list to callers that render one.
+ *
+ * Every read below that is documented as returning rows goes through this. A
+ * panel that maps over its result should not be able to blank the whole
+ * dashboard because a backend returned `{}` — React unmounts the tree on a
+ * render error, and one panel's surprise became a white screen with the
+ * navigation gone and no way back.
+ */
+const listOf = (value) => (Array.isArray(value) ? value : []);
+
+/** Cache keys, named once so a panel seeding one cannot misspell it. */
+export const cacheKeys = {
+  services: "adminGetServices",
+  settings: "adminGetSettings",
+  users: "adminGetUsers",
+  reports: "adminGetReports",
+  overview: (period) => `adminGetOverview:${JSON.stringify(period)}`,
+  responses: (filters) => `adminGetResponses:${JSON.stringify(filters)}`,
+  coaRequests: (filters) => `adminGetCoaRequests:${JSON.stringify(filters)}`,
+  serviceStats: (period) => `adminGetServiceStats:${JSON.stringify(period)}`,
+};
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const requireBackend = () => {
@@ -111,8 +210,20 @@ const demoConfig = {
 
 export async function getPortalConfig() {
   if (DEMO_MODE && !HAS_REMOTE) return demoConfig;
-  return call("getPortalConfig");
+  return cachedCall("getPortalConfig", CONFIG_TTL_MS, () =>
+    call("getPortalConfig"),
+  );
 }
+
+/**
+ * Forces the next read to go to the server. The survey calls this when the
+ * backend has told it the programme list it is holding is out of date, which
+ * is precisely the moment a cached copy would be wrong.
+ */
+export const refreshPortalConfig = () => {
+  invalidate("getPortalConfig");
+  return getPortalConfig();
+};
 
 export async function submitResponse(payload, turnstileToken = "") {
   if (DEMO_MODE && !HAS_REMOTE) {
@@ -128,6 +239,8 @@ export const verifyCertificate = (code) => call("verifyCertificate", { code });
 
 export async function adminLogin(email, password, turnstileToken = "") {
   const session = await call("adminLogin", { email, password, turnstileToken });
+  // Whatever the previous occupant of this tab read is not this account's to see.
+  clearCache();
   storeAdminSession(session);
   return session;
 }
@@ -142,38 +255,90 @@ export async function adminLogout() {
 }
 
 export const getAdminOverview = (period) =>
-  adminCall("adminGetOverview", { period });
+  cachedCall(cacheKeys.overview(period), READ_TTL_MS, () =>
+    adminCall("adminGetOverview", { period }),
+  );
 export const getAdminResponses = (filters = {}) =>
-  adminCall("adminGetResponses", { filters });
+  cachedCall(cacheKeys.responses(filters), READ_TTL_MS, () =>
+    adminCall("adminGetResponses", { filters }),
+  );
 
 export const getCoaRequests = (filters = {}) =>
-  adminCall("adminGetCoaRequests", { filters });
-export const saveCoaDetails = (payload) =>
-  adminCall("adminSaveCoaDetails", { payload });
-export const generateCoa = (responseId, issueKey) =>
-  adminCall("adminGenerateCoa", { responseId, issueKey });
+  cachedCall(cacheKeys.coaRequests(filters), READ_TTL_MS, () =>
+    adminCall("adminGetCoaRequests", { filters }),
+  ).then(listOf);
 
-export const getAdminServices = () => adminCall("adminGetServices");
-export const saveAdminService = (payload) =>
-  adminCall("adminSaveService", { payload });
+/**
+ * Every write below drops what it invalidates before returning, so the caller's
+ * next read cannot be served a copy from before the change. Certificate work
+ * touches the response row as well as the request list, and both the dashboard
+ * and the report read from responses — hence the wider sweeps.
+ */
+export const saveCoaDetails = async (payload) => {
+  const result = await adminCall("adminSaveCoaDetails", { payload });
+  invalidate("adminGetCoaRequests", "adminGetResponses");
+  return result;
+};
+export const generateCoa = async (responseId, issueKey) => {
+  const result = await adminCall("adminGenerateCoa", { responseId, issueKey });
+  invalidate("adminGetCoaRequests", "adminGetResponses", "adminGetOverview");
+  return result;
+};
+
+export const getAdminServices = () =>
+  cachedCall(cacheKeys.services, READ_TTL_MS, () =>
+    adminCall("adminGetServices"),
+  ).then(listOf);
+export const saveAdminService = async (payload) => {
+  const result = await adminCall("adminSaveService", { payload });
+  // The public programme list and the fee flag both come from this sheet, so
+  // the survey's own cached config has to go with it.
+  invalidate("adminGetServices", "getPortalConfig", "adminGetOverview");
+  return result;
+};
 
 export const getServiceStats = (period) =>
-  adminCall("adminGetServiceStats", { period });
-export const saveServiceStats = (period, rows) =>
-  adminCall("adminSaveServiceStats", { period, rows });
+  cachedCall(cacheKeys.serviceStats(period), READ_TTL_MS, () =>
+    adminCall("adminGetServiceStats", { period }),
+  ).then(listOf);
+export const saveServiceStats = async (period, rows) => {
+  const result = await adminCall("adminSaveServiceStats", { period, rows });
+  invalidate("adminGetServiceStats");
+  return result;
+};
 
-export const generateReport = (period) =>
-  adminCall("adminGenerateReport", { period });
-export const getGeneratedReports = () => adminCall("adminGetReports");
+export const generateReport = async (period) => {
+  const result = await adminCall("adminGenerateReport", { period });
+  invalidate("adminGetReports");
+  return result;
+};
+export const getGeneratedReports = () =>
+  cachedCall(cacheKeys.reports, READ_TTL_MS, () =>
+    adminCall("adminGetReports"),
+  ).then(listOf);
 
-export const getAdminSettings = () => adminCall("adminGetSettings");
-export const saveAdminSettings = (settings) =>
-  adminCall("adminSaveSettings", { settings });
+export const getAdminSettings = () =>
+  cachedCall(cacheKeys.settings, READ_TTL_MS, () =>
+    adminCall("adminGetSettings"),
+  );
+export const saveAdminSettings = async (settings) => {
+  const result = await adminCall("adminSaveSettings", { settings });
+  invalidate("adminGetSettings");
+  return result;
+};
 
-export const getAdminUsers = () => adminCall("adminGetUsers");
-export const saveAdminUser = (payload) =>
-  adminCall("adminSaveUser", { payload });
+export const getAdminUsers = () =>
+  cachedCall(cacheKeys.users, READ_TTL_MS, () =>
+    adminCall("adminGetUsers"),
+  ).then(listOf);
+export const saveAdminUser = async (payload) => {
+  const result = await adminCall("adminSaveUser", { payload });
+  invalidate("adminGetUsers");
+  return result;
+};
 
+// Deliberately uncached: a tamper-evident log read from a copy is not a read
+// of the log.
 export const getAdminAuditLog = (filters = {}) =>
   adminCall("adminGetAuditLog", { filters });
 
@@ -186,9 +351,11 @@ export async function uploadCoaTemplate(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-  return adminCall("adminUploadCoaTemplate", {
+  const result = await adminCall("adminUploadCoaTemplate", {
     payload: { filename: file.name, mimeType: file.type, base64 },
   });
+  invalidate("adminGetSettings");
+  return result;
 }
 
 export async function uploadSignature(file) {
@@ -200,7 +367,9 @@ export async function uploadSignature(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-  return adminCall("adminUploadSignature", {
+  const result = await adminCall("adminUploadSignature", {
     payload: { filename: file.name, mimeType: file.type, base64 },
   });
+  invalidate("adminGetSettings");
+  return result;
 }

@@ -22,6 +22,14 @@ import {
   readAdminSession,
 } from "../lib/api";
 import { Brand, TurnstileWidget } from "./shared";
+import {
+  PanelBoundary,
+  Skeleton,
+  SkeletonLines,
+  SkeletonRegion,
+  SkeletonTable,
+  Tip,
+} from "./ui";
 import { CC_QUESTIONS, SQD_QUESTIONS, ccTallyOptions } from "../lib/csm";
 import { PeriodPicker, currentPeriod, describePeriod } from "./PeriodPicker";
 import {
@@ -200,29 +208,36 @@ export function AdminDashboard() {
           {visibleTabs.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button
+              <Tip
                 key={entry.id}
-                className={tab === entry.id ? "active" : ""}
-                onClick={() => {
-                  setTab(entry.id);
-                  setError("");
-                }}
-                title={PAGE_COPY[entry.id]?.[1] || entry.label}
+                block
+                placement="bottom"
+                text={PAGE_COPY[entry.id]?.[1] || entry.label}
               >
-                <Icon /> {entry.label}
-              </button>
+                <button
+                  className={tab === entry.id ? "active" : ""}
+                  aria-current={tab === entry.id ? "page" : undefined}
+                  onClick={() => {
+                    setTab(entry.id);
+                    setError("");
+                  }}
+                >
+                  <Icon /> {entry.label}
+                </button>
+              </Tip>
             );
           })}
-          <a
-            href="/"
-            onClick={(event) => {
-              event.preventDefault();
-              navigate("/");
-            }}
-            title="Open the public portal"
-          >
-            <BarChart3 /> Client portal
-          </a>
+          <Tip block placement="bottom" text="Open the public portal">
+            <a
+              href="/"
+              onClick={(event) => {
+                event.preventDefault();
+                navigate("/");
+              }}
+            >
+              <BarChart3 /> Client portal
+            </a>
+          </Tip>
         </nav>
         <div className="admin-profile">
           <span>
@@ -237,14 +252,15 @@ export function AdminDashboard() {
             <strong>{session.user?.name || session.user?.email}</strong>
             <small>{session.user?.role || "Administrator"}</small>
           </div>
-          <button
-            className="profile-logout"
-            onClick={signOut}
-            aria-label="Sign out"
-            title="Sign out of the admin module"
-          >
-            <LogOut />
-          </button>
+          <Tip text="Sign out of the admin module" placement="top" align="end">
+            <button
+              className="profile-logout"
+              onClick={signOut}
+              aria-label="Sign out"
+            >
+              <LogOut />
+            </button>
+          </Tip>
         </div>
       </aside>
 
@@ -259,22 +275,24 @@ export function AdminDashboard() {
         </header>
         {error && <div className="alert admin-alert">{error}</div>}
 
-        {tab === "overview" && (
-          <OverviewPanel period={period} onError={handleError} />
-        )}
-        {tab === "responses" && <ResponsesPanel onError={handleError} />}
-        {tab === "certificates" && <CertificatePanel onError={handleError} />}
-        {tab === "reports" && (
-          <ReportsPanel period={period} onError={handleError} />
-        )}
-        {tab === "services" && (
-          <ServicesPanel onError={handleError} canSetFees={isSuperadmin} />
-        )}
-        {tab === "settings" && (
-          <SettingsPanel onError={handleError} canSign={isSuperadmin} />
-        )}
-        {tab === "users" && isSuperadmin && <UsersPanel onError={handleError} />}
-        {tab === "audit" && isSuperadmin && <AuditPanel onError={handleError} />}
+        <PanelBoundary resetKey={tab}>
+          {tab === "overview" && (
+            <OverviewPanel period={period} onError={handleError} />
+          )}
+          {tab === "responses" && <ResponsesPanel onError={handleError} />}
+          {tab === "certificates" && <CertificatePanel onError={handleError} />}
+          {tab === "reports" && (
+            <ReportsPanel period={period} onError={handleError} />
+          )}
+          {tab === "services" && <ServicesPanel onError={handleError} />}
+          {tab === "settings" && (
+            <SettingsPanel onError={handleError} canSign={isSuperadmin} />
+          )}
+          {tab === "users" && isSuperadmin && (
+            <UsersPanel onError={handleError} />
+          )}
+          {tab === "audit" && isSuperadmin && <AuditPanel onError={handleError} />}
+        </PanelBoundary>
       </main>
     </div>
   );
@@ -290,6 +308,49 @@ const scoreLabel = (value) =>
         : value > 0
           ? "Needs improvement"
           : "No data";
+
+/**
+ * The overview's own shape, drawn before the numbers arrive.
+ *
+ * It mirrors the real layout closely enough that nothing shifts when the data
+ * lands — four cards, then the same four panels in the same grid. A spinner in
+ * the middle of the page would have cost a full reflow at exactly the moment
+ * the reader started looking.
+ */
+function OverviewSkeleton() {
+  return (
+    <SkeletonRegion label="Loading the overview for this period">
+      <section className="stats">
+        {Array.from({ length: 4 }, (_, index) => (
+          <article key={index}>
+            <Skeleton width="58%" height={11} />
+            <Skeleton
+              width="42%"
+              height={26}
+              style={{ display: "block", margin: "10px 0 6px" }}
+            />
+            <Skeleton width="66%" height={10} />
+          </article>
+        ))}
+      </section>
+      <section className="panel-grid">
+        {Array.from({ length: 4 }, (_, index) => (
+          <article className="panel" key={index}>
+            <div className="panel-head">
+              <Skeleton width="46%" height={16} />
+              <Skeleton
+                width="70%"
+                height={11}
+                style={{ display: "block", marginTop: 8 }}
+              />
+            </div>
+            <SkeletonLines lines={6} />
+          </article>
+        ))}
+      </section>
+    </SkeletonRegion>
+  );
+}
 
 function OverviewPanel({ period, onError }) {
   const [data, setData] = useState(null),
@@ -312,45 +373,56 @@ function OverviewPanel({ period, onError }) {
     };
   }, [period.type, period.year, period.quarter]);
 
-  if (loading && !data)
-    return <section className="panel-loading">Loading overview…</section>;
+  if (loading && !data) return <OverviewSkeleton />;
   const overall = data?.overall || 0;
   const maxServiceScore = 5;
 
   return (
-    <>
+    // Dimmed rather than replaced while a new period loads: the previous
+    // period's figures stay readable, and swapping them for a skeleton on every
+    // period change would make the picker feel like it reloaded the page.
+    <div className={loading ? "is-refreshing" : ""}>
       <section className="stats">
         <article>
           <span>Responses · {describePeriod(period)}</span>
-          <strong>{data?.totalResponses ?? 0}</strong>
-          <i className="brand">
-            <Inbox />
-          </i>
+          <strong>{(data?.totalResponses ?? 0).toLocaleString()}</strong>
+          <Tip align="end" text="Submissions whose transaction date falls inside this reporting period.">
+            <i className="brand">
+              <Inbox />
+            </i>
+          </Tip>
         </article>
         <article>
           <span>Overall score</span>
           <strong>{overall ? overall.toFixed(2) : "—"}</strong>
           <small className="stat-note">{scoreLabel(overall)}</small>
-          <i className="gold">
-            <BarChart3 />
-          </i>
+          <Tip align="end" text="The mean of every rated SQD answer in the period, weighted by respondent. N/A answers are left out rather than counted as zero.">
+            <i className="gold">
+              <BarChart3 />
+            </i>
+          </Tip>
         </article>
         <article>
           <span>Certificates issued</span>
-          <strong>{data?.coa?.issued ?? 0}</strong>
+          <strong>{(data?.coa?.issued ?? 0).toLocaleString()}</strong>
           <small className="stat-note">
-            {data?.coa?.pending ?? 0} awaiting release (all periods)
+            {(data?.coa?.pending ?? 0).toLocaleString()} awaiting release (all
+            periods)
           </small>
-          <i className="teal">
-            <FileSignature />
-          </i>
+          <Tip align="end" text="Issued counts this period. The awaiting figure spans every period, because a request left unissued does not expire.">
+            <i className="teal">
+              <FileSignature />
+            </i>
+          </Tip>
         </article>
         <article>
           <span>Aware of the Citizen's Charter</span>
           <strong>{data?.ccAwareness ? `${data.ccAwareness}%` : "—"}</strong>
-          <i className="brand">
-            <ShieldCheck />
-          </i>
+          <Tip align="end" text="Respondents who answered CC1 with one of the first three options — that is, who knew of a Citizen's Charter or saw this office's.">
+            <i className="brand">
+              <ShieldCheck />
+            </i>
+          </Tip>
         </article>
       </section>
 
@@ -475,11 +547,32 @@ function OverviewPanel({ period, onError }) {
           </div>
         </article>
       </section>
-    </>
+    </div>
   );
 }
 
 const PAGE_SIZE = 100;
+
+/**
+ * What the certificate column's four words mean, said once on the header
+ * rather than on every row.
+ */
+const COA_COLUMN_HELP =
+  "REQUESTED — asked for, not yet issued. ISSUED — generated and emailed. " +
+  "ERROR — the last attempt failed; retry from the Certificates tab. " +
+  "NONE — this client did not ask for one.";
+
+/** Named once, so the placeholder table and the real one cannot drift apart. */
+const RESPONSE_COLUMNS = [
+  "Reference",
+  "Date",
+  "Program",
+  "Client",
+  "Region",
+  "Overall",
+  "COA",
+  "",
+];
 
 function ResponsesPanel({ onError }) {
   const [data, setData] = useState({ rows: [], total: 0, offset: 0 }),
@@ -526,8 +619,30 @@ function ResponsesPanel({ onError }) {
   };
 
   if (loading && !rows.length)
-    return <section className="panel-loading">Loading responses…</section>;
+    return (
+      <SkeletonRegion label="Loading responses" className="table-card">
+        <div className="table-tools">
+          <div>
+            <Skeleton width={168} height={17} />
+            <Skeleton
+              width={232}
+              height={11}
+              style={{ display: "block", marginTop: 9 }}
+            />
+          </div>
+          <Skeleton width={300} height={38} radius={10} />
+        </div>
+        <SkeletonTable
+          columns={RESPONSE_COLUMNS}
+          rows={Math.min(PAGE_SIZE, 8)}
+        />
+      </SkeletonRegion>
+    );
   return (
+    // The refreshing treatment goes on the results below, never on this
+    // section: it disables pointer events, and putting it here meant the
+    // search box dimmed and stopped accepting input for the duration of the
+    // search it had just started.
     <section className="table-card">
       <div className="table-tools">
         <div>
@@ -568,18 +683,25 @@ function ResponsesPanel({ onError }) {
           )}
         </form>
       </div>
-      <div className="table-scroll">
+      <div className={`table-scroll${loading ? " is-refreshing" : ""}`}>
         <table>
           <thead>
             <tr>
-              <th>Reference</th>
-              <th>Date</th>
-              <th>Program</th>
-              <th>Client</th>
-              <th>Region</th>
-              <th>Overall</th>
-              <th>COA</th>
-              <th />
+              {RESPONSE_COLUMNS.map((column, index) => (
+                <th key={index}>
+                  {/* align="end" because the column sits at the far side of a
+                      scroll container, which clips a centred bubble. */}
+                  {column === "COA" ? (
+                    <Tip text={COA_COLUMN_HELP} placement="bottom" align="end">
+                      <span tabIndex={0} className="th-help">
+                        COA
+                      </span>
+                    </Tip>
+                  ) : (
+                    column
+                  )}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -602,8 +724,14 @@ function ResponsesPanel({ onError }) {
                     </small>
                   </td>
                   <td>{row.region}</td>
-                  <td>{row.overall ? row.overall.toFixed(2) : "—"}</td>
+                  <td className="numeric">
+                    {row.overall ? row.overall.toFixed(2) : "—"}
+                  </td>
                   <td>
+                    {/* The explanation lives on the column header, not here.
+                        A tooltip per row would make every pill a tab stop —
+                        a hundred of them, to define a word already spelled
+                        out in the cell. */}
                     <span
                       className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus === "REQUESTED" ? "pending" : "disabled"}`}
                     >
@@ -613,12 +741,12 @@ function ResponsesPanel({ onError }) {
                   <td>
                     <button
                       className="mini-button"
+                      aria-expanded={expanded === row.referenceId}
                       onClick={() =>
                         setExpanded(
                           expanded === row.referenceId ? "" : row.referenceId,
                         )
                       }
-                      title="Show the full answer set"
                     >
                       {expanded === row.referenceId ? "Hide" : "Details"}
                     </button>

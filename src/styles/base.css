@@ -86,6 +86,182 @@ code {
   color: var(--muted);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------- Skeletons ------------------------------- */
+
+/* A sweep rather than a pulse: a pulse reads as something blinking at you,
+   a sweep reads as something arriving. Kept slow and low-contrast so a page
+   full of them is calm instead of busy. */
+.skeleton {
+  display: inline-block;
+  vertical-align: middle;
+  background:
+    linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.75) 50%,
+        transparent 100%
+      )
+      0 0 / 220% 100% no-repeat,
+    #e6ecf4;
+  animation: skeleton-sweep 1.5s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  from {
+    background-position-x: -140%;
+  }
+  to {
+    background-position-x: 240%;
+  }
+}
+/* Motion that repeats forever is exactly what this setting is for. The block
+   still reads as a placeholder without it. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: #e6ecf4;
+  }
+}
+.skeleton-table td {
+  vertical-align: middle;
+}
+
+/* -------------------------------- Tooltips ------------------------------- */
+
+.tip {
+  position: relative;
+  display: inline-flex;
+}
+.tip-block {
+  display: block;
+  width: 100%;
+}
+/* The wrapper became the flex item its trigger used to be, so the trigger no
+   longer stretches and a full-width nav button shrank to its text. Passing the
+   width through restores it. The bubble is positioned out of flow and must not
+   be caught by this. */
+.tip-block > :not(.tip-bubble) {
+  width: 100%;
+}
+.tip-bubble {
+  position: absolute;
+  z-index: 60;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translate(var(--tip-x), 3px);
+  background: #16223c;
+  color: #fff;
+  font: 600 11.5px/1.45 "DM Sans", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  text-align: center;
+  padding: 7px 10px;
+  border-radius: 8px;
+  width: max-content;
+  max-width: 232px;
+  /* Typography stated, never inherited. A tip can be dropped inside anything,
+     and a table header passed it both `white-space: nowrap` — laying the text
+     out on one 1000px line inside a 232px box, illegible and wide enough to
+     stretch its grid column until the page scrolled sideways — and
+     `text-transform: uppercase`, which shouted a sentence of help text. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-transform: none;
+  font-style: normal;
+  box-shadow: 0 8px 22px rgba(12, 32, 80, 0.22);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0.14s;
+  pointer-events: none;
+}
+.tip-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-top-color: #16223c;
+}
+.tip-bottom .tip-bubble {
+  bottom: auto;
+  top: calc(100% + 8px);
+  transform: translate(var(--tip-x), -3px);
+}
+.tip-bottom .tip-bubble::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: #16223c;
+}
+
+/* A centred bubble on a trigger near an edge hangs past it — off the window,
+   or out of a scrolling table — so alignment anchors its near edge to the
+   trigger's instead.
+
+   The horizontal offset is a variable rather than a transform per state
+   because the hover and rest rules have identical specificity: written as
+   competing transforms, whichever came last in the file won for every
+   alignment, and the end-aligned bubble kept the centred -50% shift. One
+   variable means there is nothing to win. */
+.tip-bubble {
+  --tip-x: -50%;
+}
+.tip-align-end .tip-bubble {
+  --tip-x: 0;
+  left: auto;
+  right: 0;
+}
+.tip-align-end .tip-bubble::after {
+  left: auto;
+  right: 14px;
+  margin-left: 0;
+}
+.tip-align-start .tip-bubble {
+  --tip-x: 0;
+  left: 0;
+  right: auto;
+}
+.tip-align-start .tip-bubble::after {
+  left: 14px;
+  margin-left: 0;
+}
+/* Focus as well as hover, so the tip is reachable by keyboard rather than
+   being mouse-only the way `title` effectively is. */
+.tip:hover .tip-bubble,
+.tip:focus-within .tip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(var(--tip-x), 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip-bubble {
+    transition: none;
+  }
+}
+/* Nothing hovers on a touch screen: the bubble would either never show or
+   stick after a tap. Every trigger carries its own visible label or an
+   aria-label, so dropping it there loses nothing. */
+@media (hover: none) {
+  .tip-bubble {
+    display: none;
+  }
+}
+
 /* ------------------------------ Primitives ------------------------------- */
 
 .eyebrow {

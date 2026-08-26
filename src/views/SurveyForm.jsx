@@ -26,8 +26,9 @@ import {
   sqdApplicable,
   t,
 } from "../lib/csm";
-import { getPortalConfig, submitResponse } from "../lib/api";
+import { getPortalConfig, refreshPortalConfig, submitResponse } from "../lib/api";
 import { Bilingual, Brand, LanguageToggle, TurnstileWidget } from "./shared";
+import { Skeleton, SkeletonRegion, Tip } from "./ui";
 import { navigate } from "../router";
 
 /**
@@ -122,12 +123,14 @@ function SqdRating({ question, value, onChange, language }) {
           was the one chosen, because the selection lived only in a CSS class.
           Native radios carry the checked state, the "3 of 5" position and
           arrow-key movement without any of it being hand-written. */}
+      {/* No `title` on the options: the label one would show is already
+          printed beneath the emoji, so it repeats the visible text a second
+          late and adds nothing. */}
       <div className="sqd-scale">
         {SQD_SCALE.map((option) => (
           <label
             key={option.value}
             className={`sqd-option${value === option.value ? " selected" : ""}`}
-            title={t(option, language)}
           >
             <input
               type="radio"
@@ -152,6 +155,7 @@ export function SurveyForm() {
     [step, setStep] = useState(0),
     [form, setForm] = useState(createEmptyForm),
     [services, setServices] = useState([]),
+    [servicesLoaded, setServicesLoaded] = useState(false),
     [cc, setCc] = useState({}),
     [sqd, setSqd] = useState({}),
     [busy, setBusy] = useState(false),
@@ -164,10 +168,19 @@ export function SurveyForm() {
     [turnstileToken, setTurnstileToken] = useState(""),
     [turnstileReset, setTurnstileReset] = useState(0);
 
-  const loadServices = () =>
-    getPortalConfig().then((config) => {
+  // `fresh` skips the cached copy. The recovery path below runs because the
+  // backend has just told us our copy of the programme list is out of date, so
+  // re-reading the same cached copy would answer the refusal with the very
+  // thing that caused it.
+  const loadServices = (fresh = false) =>
+    (fresh ? refreshPortalConfig() : getPortalConfig()).then((config) => {
       const list = (config.services || []).filter((s) => s.active !== false);
       setServices(list);
+      // Tracked separately from `services.length`: an office with nothing
+      // active is a loaded list that happens to be empty, and treating it as
+      // "still loading" left a placeholder animating for ever with no way to
+      // tell that the request had already come back.
+      setServicesLoaded(true);
       return list;
     });
 
@@ -294,7 +307,7 @@ export function SurveyForm() {
           // the same time — but it can fail, and the question has to appear
           // either way or this branch strands the client it exists to rescue.
           setFeesRequiredFor(form.serviceId);
-          await loadServices().catch(() => {});
+          await loadServices(true).catch(() => {});
           setSqd((state) => ({ ...state, sqd5: "" }));
           setStep(3);
           setTurnstileToken("");
@@ -394,20 +407,36 @@ export function SurveyForm() {
         <Brand />
         <div className="topbar-actions">
           <LanguageToggle language={language} onChange={setLanguage} />
-          <a
-            className="topbar-link"
-            href="/verification"
-            onClick={(event) => {
-              event.preventDefault();
-              navigate("/verification");
-            }}
-            title="Verify an issued Certificate of Appearance"
+          <Tip
+            placement="bottom"
+            align="end"
+            text={
+              language === "tl"
+                ? "Tingnan kung tunay ang isang Certificate of Appearance"
+                : "Check that a Certificate of Appearance is genuine"
+            }
           >
-            <BadgeCheck size={17} />
-            <span className="topbar-link-label">
-              {language === "tl" ? "Beripikahin" : "Verify"}
-            </span>
-          </a>
+            <a
+              className="topbar-link"
+              href="/verification"
+              onClick={(event) => {
+                event.preventDefault();
+                navigate("/verification");
+              }}
+              /* The label is hidden below 380px, so the accessible name has to
+                 come from here rather than from text that may not be rendered. */
+              aria-label={
+                language === "tl"
+                  ? "Beripikahin ang Certificate of Appearance"
+                  : "Verify a Certificate of Appearance"
+              }
+            >
+              <BadgeCheck size={17} />
+              <span className="topbar-link-label">
+                {language === "tl" ? "Beripikahin" : "Verify"}
+              </span>
+            </a>
+          </Tip>
         </div>
       </header>
 
@@ -703,13 +732,44 @@ export function SurveyForm() {
                     {language === "tl" ? "Serbisyong nakuha" : "Service availed"}{" "}
                     <b>*</b>
                   </legend>
-                  <ChoiceGroup
-                    name="serviceId"
-                    value={form.serviceId}
-                    onChange={(value) => update("serviceId", value)}
-                    language={language}
-                    options={serviceOptions}
-                  />
+                  {/* The one place a client waits on the network. Four blocks
+                      the shape of the choices that are coming, so the step does
+                      not jump when they arrive. */}
+                  {!servicesLoaded && !error ? (
+                    <SkeletonRegion
+                      label={
+                        language === "tl"
+                          ? "Kinukuha ang listahan ng serbisyo"
+                          : "Loading the list of services"
+                      }
+                      className="choice-group cols-1"
+                    >
+                      {Array.from({ length: 4 }, (_, index) => (
+                        <span className="choice choice-skeleton" key={index}>
+                          <Skeleton width={17} height={17} radius={9} />
+                          <Skeleton width={`${68 - index * 7}%`} />
+                        </span>
+                      ))}
+                    </SkeletonRegion>
+                  ) : serviceOptions.length ? (
+                    <ChoiceGroup
+                      name="serviceId"
+                      value={form.serviceId}
+                      onChange={(value) => update("serviceId", value)}
+                      language={language}
+                      options={serviceOptions}
+                    />
+                  ) : (
+                    // Loaded, and there is genuinely nothing to choose. Says so
+                    // rather than showing an empty box the client cannot get
+                    // past and cannot explain.
+                    <div className="notice">
+                      <Info size={15} />
+                      {language === "tl"
+                        ? "Walang serbisyong maaaring piliin sa ngayon. Pakisubukan muli mamaya o makipag-ugnayan sa OSDS."
+                        : "No services are available to choose from right now. Please try again later or contact the OSDS."}
+                    </div>
+                  )}
                   {isOtherService && (
                     <label className="other-service">
                       {language === "tl"

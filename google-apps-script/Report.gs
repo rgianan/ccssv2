@@ -345,7 +345,15 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
   var sheet = ss.insertSheet('CSM Summary', 0);
   var width = REMARKS_COLUMN_;
 
-  sheet.getRange(1, 1, 1, width).merge()
+  // The banner is two merges, not one, and the seam is deliberately at the
+  // frozen-column boundary below. Sheets refuses to freeze a column that would
+  // cut a merged cell in half, so a single A1:Y1 title made setFrozenColumns(2)
+  // throw and took the whole workbook down with it. Splitting it there keeps
+  // both: a continuous blue bar, and a program column that stays put while the
+  // reader scrolls through twenty-odd rating columns.
+  sheet.getRange(1, 1, 1, SQD_FIRST_COLUMN_ - 1).merge()
+    .setBackground('#0032a0');
+  sheet.getRange(1, SQD_FIRST_COLUMN_, 1, width - SQD_FIRST_COLUMN_ + 1).merge()
     .setValue('CHED CLIENT SATISFACTION MEASUREMENT REPORT')
     .setFontSize(14).setFontWeight('bold').setHorizontalAlignment('center')
     .setBackground('#0032a0').setFontColor('#ffffff');
@@ -551,7 +559,24 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
   sheet.setColumnWidth(CLIENTS_COLUMN_, 82);
   sheet.setColumnWidth(TRANSACTIONS_COLUMN_, 95);
   sheet.setColumnWidth(REMARKS_COLUMN_, 200);
-  sheet.setFrozenColumns(2);
+  freezeColumns_(sheet, SQD_FIRST_COLUMN_ - 1);
+}
+
+/**
+ * Freezing is a convenience; the report is the deliverable.
+ *
+ * Sheets rejects a freeze that would split a merged cell, and that rejection
+ * used to abort report generation entirely — an office ended a quarter with no
+ * workbook because of a cosmetic setting. A refusal now costs the frozen
+ * columns and nothing else, and says why in the execution log.
+ */
+function freezeColumns_(sheet, count) {
+  try {
+    sheet.setFrozenColumns(count);
+  } catch (error) {
+    console.info('Frozen columns skipped on ' + sheet.getName() + ': ' +
+      String(error && error.message || error).slice(0, 160));
+  }
 }
 
 /** Sheet names may not repeat, and Sheets rejects several punctuation marks. */

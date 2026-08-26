@@ -231,22 +231,23 @@ function invalidatePublicCache_() {
 }
 
 /**
- * Publishes a file to anyone holding its link.
+ * Publishes a file to anyone holding its link. Returns whether that worked.
  *
- * Returns a note when the Workspace forbids it, but no longer treats that as a
- * problem for the client: the certificate travels as an email attachment, so a
- * refused link costs only the convenience of opening it from Drive. The note
- * says so, because an alarming message about a certificate that in fact
- * arrived correctly sends an administrator chasing nothing.
+ * A refusal is not reported to the administrator. It is a standing Workspace
+ * policy, not an event: it will fail identically on every certificate, nobody
+ * issuing one can change it, and the client is unaffected because the PDF
+ * travels as an attachment. Saying so on every issue only buries the part that
+ * matters — that the certificate went out — in a sentence that reads like a
+ * fault. The reason still goes to the execution log for anyone diagnosing it.
  */
 function shareFileByLink_(file) {
   try {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    return '';
+    return true;
   } catch (error) {
-    return 'This Workspace does not allow link sharing (' +
-      String(error && error.message || error).slice(0, 120) +
-      '), so no shareable link was created. The certificate itself was attached to the email.';
+    console.info('Link sharing refused by Workspace policy: ' +
+      String(error && error.message || error).slice(0, 160));
+    return false;
   }
 }
 

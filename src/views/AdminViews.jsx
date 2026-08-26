@@ -687,6 +687,7 @@ function ResponsesPanel({ onError }) {
           {/* Filtering happens on the server now, so the search needs a visible
               trigger — pressing Enter is not a discoverable affordance. */}
           <Tip
+            align="end"
             placement="bottom"
             text="Searches the whole sheet, not just the page on screen"
           >

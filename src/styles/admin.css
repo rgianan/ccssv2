@@ -307,6 +307,12 @@
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 16px;
+}
+/* Only the table card clips. Its table runs edge to edge, so without this the
+   header band would square off the rounded corners. A panel pads its contents
+   by 22px, so nothing of its own ever reaches the radius — and the clipping it
+   did not need was cutting the top off any tooltip raised near its edge. */
+.table-card {
   overflow: hidden;
 }
 .panel {

@@ -113,19 +113,6 @@ const COA_COLUMNS = [
   "Actions",
 ];
 
-/**
- * Said once on the header rather than on each row.
- *
- * A tooltip inside .table-scroll is clipped by it — the container needs
- * overflow-x for wide tables, which forces overflow-y, so a bubble is cut off
- * at the top row or the bottom one whichever way it opens. These three
- * explanations were identical on every row anyway.
- */
-const COA_ACTIONS_HELP =
-  "Edit changes the wording printed on the certificate. " +
-  "PDF opens the issued file in the office's Drive — the client has their own copy by email. " +
-  "Generate builds the PDF and emails it as an attachment; Reissue does it again, and the earlier certificate stays valid.";
-
 export function CertificatePanel({ onError }) {
   const [rows, setRows] = useState([]),
     [status, setStatus] = useState("REQUESTED"),
@@ -264,22 +251,13 @@ export function CertificatePanel({ onError }) {
             <table>
               <thead>
                 <tr>
+                  {/* Plain text, no tooltip. Anything inside .table-scroll is
+                      clipped by it, and "Awaiting release" is empty whenever
+                      the office is up to date — the state where a bubble had
+                      least room and least to say. The buttons below carry
+                      their own labels. */}
                   {COA_COLUMNS.map((column, index) => (
-                    <th key={index}>
-                      {column === "Actions" ? (
-                        <Tip
-                          align="end"
-                          placement="bottom"
-                          text={COA_ACTIONS_HELP}
-                        >
-                          <span tabIndex={0} className="th-help">
-                            Actions
-                          </span>
-                        </Tip>
-                      ) : (
-                        column
-                      )}
-                    </th>
+                    <th key={index}>{column}</th>
                   ))}
                 </tr>
               </thead>

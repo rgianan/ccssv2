@@ -310,7 +310,7 @@ function issueCoa_(responseId, issueKey, outputFolder) {
     var pdfBlob = driveExportPdf_(docId);
     pdfBlob.setName('Certificate of Appearance - ' + record.coaName + ' - ' + record.referenceId + '.pdf');
     var pdfFile = outputFolder.createFile(pdfBlob);
-    var sharingNote = shareFileByLink_(pdfFile);
+    var shared = shareFileByLink_(pdfFile);
     // The working Google Doc has served its purpose; the PDF is the record.
     try { DriveApp.getFileById(docId).setTrashed(true); } catch (_) {}
 
@@ -340,7 +340,7 @@ function issueCoa_(responseId, issueKey, outputFolder) {
     var emailStatus;
     try {
       emailStatus = sendCoaEmail_(
-        record, sharingNote ? '' : certificateUrl, verificationCode,
+        record, shared ? certificateUrl : '', verificationCode,
         verificationUrl, settings, pdfBlob,
       );
     } catch (mailError) {
@@ -354,7 +354,7 @@ function issueCoa_(responseId, issueKey, outputFolder) {
       referenceId: record.referenceId,
       certificateUrl: certificateUrl,
       verificationCode: verificationCode,
-      emailStatus: safeTrim_([setupNote, sharingNote, emailStatus].join(' '))
+      emailStatus: safeTrim_([setupNote, emailStatus].join(' '))
     };
   } catch (error) {
     // A failed first issuance leaves ERROR for the admin to act on. A failed

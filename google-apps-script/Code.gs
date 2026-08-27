@@ -609,10 +609,23 @@ function resetCsmData_(confirmation) {
 
     // One entry, written after the clear, so the log opens with the reset that
     // emptied it rather than with an unexplained gap.
+    //
+    // The email is resolved separately and defensively. Session.getEffectiveUser
+    // needs an OAuth scope this project does not request, and asking for it
+    // would force everyone to re-authorise the deployment for a single
+    // editor-run function. Nested inside the audit call, that lookup threw and
+    // took the whole entry with it — the reset emptied the log and then failed
+    // to say so, which is the one outcome this entry exists to prevent. Losing
+    // the name is a footnote; losing the record is the bug.
+    var actorEmail = '';
+    try {
+      actorEmail = safeTrim_(Session.getEffectiveUser().getEmail()).toLowerCase();
+    } catch (_) {
+      // Left blank. Apps Script logs the executing account against the run.
+    }
     try {
       appendAuditForRequest_('csmDataReset', {}, true, '',
-        { email: safeTrim_(Session.getEffectiveUser().getEmail()).toLowerCase(), role: 'script' },
-        {});
+        { email: actorEmail, role: 'script' }, {});
     } catch (auditError) {
       console.error('Reset recorded no audit entry: ' + String(auditError && auditError.message || auditError));
     }

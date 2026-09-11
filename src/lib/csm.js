@@ -380,7 +380,7 @@ export const COPY = {
   },
   intro: {
     en: "The Client Satisfaction Measurement (CSM) tracks the customer experience of government offices. Your feedback on your recently concluded transaction will help this office provide a better service.",
-    tl: "Sinusukat ng Client Satisfaction Measurement (CSM) ang karanasan ng mamamayan sa mga tanggapan ng pamahalaan. Ang iyong puna sa kakatapos mong transaksyon ay makakatulong sa tanggapang ito na magbigay ng mas mahusay na serbisyo.",
+    tl: "Sinusukat ng Client Satisfaction Measurement (CSM) ang karanasan ng mga kliyente sa mga tanggapan ng pamahalaan. Ang inyong feedback tungkol sa katatapos lamang na transaksyon ay makatutulong sa tanggapang ito upang higit pang mapabuti ang serbisyo nito.",
   },
   privacy: {
     en: "Personal information shared will be kept confidential and you always have the option to answer this form.",

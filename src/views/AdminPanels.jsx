@@ -630,6 +630,7 @@ export function ReportsPanel({ period, onError }) {
                     <input
                       type="number"
                       min="0"
+                      step="1"
                       className="cell-input"
                       value={row.clients ?? ""}
                       onChange={(event) =>
@@ -646,6 +647,7 @@ export function ReportsPanel({ period, onError }) {
                     <input
                       type="number"
                       min="0"
+                      step="1"
                       className="cell-input"
                       value={row.transactions ?? ""}
                       onChange={(event) =>

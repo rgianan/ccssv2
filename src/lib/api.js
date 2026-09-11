@@ -270,6 +270,9 @@ export async function adminLogout() {
   }
 }
 
+/** The account as the backend sees it now — role and active state included. */
+export const validateAdminSession = () => adminCall("adminValidateSession");
+
 export const getAdminOverview = (period) =>
   cachedCall(cacheKeys.overview(period), READ_TTL_MS, () =>
     adminCall("adminGetOverview", { period }),

@@ -80,7 +80,7 @@ const HOW_IT_WORKS = [
     },
     tl: {
       title: "Ginagamit namin ang iyong sagot",
-      body: "Ipinapakita ng iyong puna kung ano ang dapat naming ayusin, at kasama ito sa ulat namin kung gaano kami kahusay maglingkod sa publiko.",
+      body: "Ipinapakita ng inyong feedback kung ano ang kailangan naming ayusin, at isinasama ito sa ulat na aming isinusumite tungkol sa kalidad ng serbisyong ibinibigay ng tanggapang ito sa publiko.",
     },
   },
 ];

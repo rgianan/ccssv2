@@ -976,6 +976,8 @@ function backfillServiceFees_(sheet) {
 
     sheet.getRange(2, feeCol + 1, column.length, 1).setValues(column);
     invalidatePublicCache_();
+    // The overview reads every answer through this flag.
+    invalidateResultCache_();
     return filled;
   } catch (error) {
     console.error('has_fees backfill skipped: ' + String(error && error.message || error));
@@ -1210,7 +1212,24 @@ function submitResponse(formData) {
   var service = readServices_().filter(function (entry) {
     return entry.service_id === safeTrim_(formData.serviceId) && entry.active;
   })[0];
-  if (!service) return { status: 'BAD_REQUEST', message: 'Please select the service you availed.' };
+  // Also the answer when a programme is withdrawn while a client has the form
+  // open. The code lets the browser refresh its list — its copy still offers
+  // the programme, so a plain message had the client pick it and be refused
+  // again on every Submit.
+  if (!service)
+    return {
+      status: 'BAD_REQUEST',
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'The service you chose is no longer offered. Please choose again from the list.'
+    };
+
+  // Checked against the choices the form offers, for the reason region and
+  // the Charter answers are: the report has a column for MALE, FEMALE and N/A
+  // (blank), and any other value was stored, counted in the Total and in no
+  // column — leaving a row that does not add up.
+  var sex = safeTrim_(formData.sex).toUpperCase();
+  if (sex && sex !== 'MALE' && sex !== 'FEMALE')
+    return { status: 'BAD_REQUEST', message: 'Please choose a valid option for sex.' };
 
   var otherService = safeTrim_(formData.otherService).slice(0, 200);
   if (service.category === 'other' && !otherService)
@@ -1316,7 +1335,7 @@ function submitResponse(formData) {
     put(['month'], Utilities.formatDate(transactionDate, timezone_(), 'MMMM').toUpperCase());
     put(['year'], transactionDate.getFullYear());
     put(['clienttype'], clientType.toUpperCase());
-    put(['sex'], safeTrim_(formData.sex).toUpperCase());
+    put(['sex'], sex);
     put(['age'], age || 'N/A');
     put(['region'], region);
     put(['regioncode'], regionCode_(region));
@@ -1328,7 +1347,9 @@ function submitResponse(formData) {
     SQD_KEYS.forEach(function (key) { put([key], sqdAnswers[key]); });
     put(['suggestions'], safeTrim_(formData.suggestions).slice(0, 1500));
     put(['email'], email);
-    put(['language'], safeTrim_(formData.language) || 'en');
+    // The only two the form has. Stored as sent, this was an unbounded field
+    // any caller could fill with whatever it liked.
+    put(['language'], safeTrim_(formData.language) === 'tl' ? 'tl' : 'en');
     put(['coarequested'], wantsCoa ? 'YES' : 'NO');
     put(['coatitle'], wantsCoa ? safeTrim_(formData.coaTitle).slice(0, 12) : '');
     put(['coaname'], wantsCoa ? coaName : '');
@@ -2489,10 +2510,14 @@ function appendAuditForRequest_(action, body, success, errorMessage, actor, requ
     var entry = {
       timestamp: Utilities.formatDate(new Date(), timezone_(), 'yyyy-MM-dd HH:mm:ss'),
       audit_id: 'AUD-' + Utilities.getUuid().replace(/-/g,'').slice(0, 16).toUpperCase(),
-      actor_email: safeTrim_((actor || {}).email).toLowerCase(),
+      // Bounded because the sign-in form puts whatever was typed as the email
+      // into both of these, before anyone is authenticated. A value past the
+      // 50,000-character cell limit could not be written, so a single request
+      // left the log permanently flagged as having lost an entry.
+      actor_email: safeTrim_((actor || {}).email).toLowerCase().slice(0, 254),
       actor_role: safeTrim_((actor || {}).role).toLowerCase(),
       action: AUDITED_ACTIONS_[action] || safeTrim_(action).toUpperCase(),
-      target_type: target.type, target_id: target.id,
+      target_type: target.type, target_id: safeTrim_(target.id).slice(0, 254),
       outcome: success ? 'SUCCESS' : 'FAILURE',
       details: JSON.stringify(success ? (target.details || {}) : { error: safeTrim_(errorMessage).slice(0, 300) }),
       request_id: safeTrim_((requestContext || {}).requestId).slice(0, 100),

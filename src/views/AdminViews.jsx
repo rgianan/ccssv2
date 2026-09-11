@@ -20,6 +20,8 @@ import {
   getAdminOverview,
   getAdminResponses,
   readAdminSession,
+  storeAdminSession,
+  validateAdminSession,
 } from "../lib/api";
 import { Brand, TurnstileWidget } from "./shared";
 import {
@@ -96,7 +98,6 @@ function AdminLogin({ onAuthenticated }) {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             autoComplete="username"
-            placeholder="admin@ched.gov.ph"
           />
         </label>
         <label>
@@ -107,7 +108,6 @@ function AdminLogin({ onAuthenticated }) {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="current-password"
-            placeholder="Enter your password"
           />
         </label>
         <TurnstileWidget
@@ -191,14 +191,56 @@ export function AdminDashboard() {
 
   // Any privileged call can come back with an expired session; drop straight to
   // the login screen instead of leaving a half-loaded dashboard on screen.
+  //
+  // Only for the backend's two "you are not signed in" answers. Matching any
+  // mention of "forbidden" also signed out an administrator who had merely
+  // lost superadmin rights ("superadmin access required"), and everyone at
+  // once when the proxy's token was misconfigured — which signing out cannot
+  // fix and whose message the login screen then hid.
   const handleError = (thrown) => {
     const message = thrown?.message || "Something went wrong.";
     setError(message);
-    if (/session|expired|authorization|forbidden/i.test(message))
+    if (/authorization required|session has expired/i.test(message))
       adminLogout().finally(() => setSession(null));
   };
 
-  if (!session) return <AdminLogin onAuthenticated={setSession} />;
+  // A session restored from this tab carries the role it had at sign-in. It is
+  // checked once on arrival, so a role changed since then shows the right
+  // tabs — rather than a demoted administrator being offered Users and Audit
+  // and meeting an error on every click. A fresh sign-in needs no check.
+  const checkedToken = useRef("");
+  useEffect(() => {
+    const token = session?.token;
+    if (!token || checkedToken.current === token) return;
+    checkedToken.current = token;
+    let stale = false;
+    validateAdminSession()
+      .then((current) => {
+        if (stale || !current?.user) return;
+        setSession((previous) => {
+          if (!previous || previous.token !== token) return previous;
+          const next = { ...previous, user: current.user, expiresAt: current.expiresAt };
+          storeAdminSession(next);
+          return next;
+        });
+      })
+      .catch((thrown) => {
+        if (!stale) handleError(thrown);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [session?.token]);
+
+  if (!session)
+    return (
+      <AdminLogin
+        onAuthenticated={(fresh) => {
+          checkedToken.current = fresh?.token || "";
+          setSession(fresh);
+        }}
+      />
+    );
   const isSuperadmin = session.user?.role?.toLowerCase() === "superadmin";
   const visibleTabs = TABS.filter((entry) => !entry.superadmin || isSuperadmin);
   const [heading, sub] = PAGE_COPY[tab] || PAGE_COPY.overview;

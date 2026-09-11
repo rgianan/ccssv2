@@ -609,9 +609,13 @@ function freezeColumns_(sheet, count) {
 
 /** Sheet names may not repeat, and Sheets rejects several punctuation marks. */
 function sheetNameFor_(code, existingNames) {
+  // Sheets compares names without regard to case, and the DATA sheet is added
+  // after the programme sheets — so a programme coded "data", or "sheet1"
+  // against the workbook's default sheet, collided and aborted the report.
+  var taken = existingNames.map(function (name) { return String(name).toUpperCase(); }).concat(['DATA']);
   var base = safeTrim_(code).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 26) || 'SERVICE';
   var name = base, suffix = 2;
-  while (existingNames.indexOf(name) >= 0) name = base.slice(0, 24) + suffix++;
+  while (taken.indexOf(name) >= 0) name = base.slice(0, 24) + suffix++;
   existingNames.push(name);
   return name;
 }
@@ -621,7 +625,9 @@ function buildServiceSheet_(ss, period, settings, service, records) {
   var sheet = ss.insertSheet(sheetNameFor_(service.code, existing));
 
   sheet.getRange(1, 1).setValue('OFFICE:').setFontWeight('bold');
-  sheet.getRange(1, 2).setValue(settings.office_name || 'Office of Student Development and Services (OSDS)');
+  // Settings come back from the sheet without their escaping apostrophe, the
+  // same as response text does, so they are escaped again on the way out.
+  sheet.getRange(1, 2).setValue(safeSheetValue_(settings.office_name || 'Office of Student Development and Services (OSDS)'));
   sheet.getRange(2, 1).setValue(period.type === 'year' ? 'PERIOD:' : 'QUARTER:').setFontWeight('bold');
   sheet.getRange(2, 2).setValue(period.label);
   sheet.getRange(3, 1).setValue('SERVICE NAME:').setFontWeight('bold');
@@ -689,8 +695,8 @@ function buildServiceSheet_(ss, period, settings, service, records) {
    ['Reviewed by:', settings.report_reviewed_by, settings.report_reviewed_title, 5],
    ['Approved by:', settings.report_approved_by, settings.report_approved_title, 8]].forEach(function (block) {
     sheet.getRange(signRow, block[3]).setValue(block[0]).setFontWeight('bold');
-    sheet.getRange(signRow + 2, block[3]).setValue(block[1] || '').setFontWeight('bold');
-    sheet.getRange(signRow + 3, block[3]).setValue(block[2] || '');
+    sheet.getRange(signRow + 2, block[3]).setValue(safeSheetValue_(block[1] || '')).setFontWeight('bold');
+    sheet.getRange(signRow + 3, block[3]).setValue(safeSheetValue_(block[2] || ''));
   });
 
   sheet.setColumnWidth(1, 110);

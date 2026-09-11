@@ -746,7 +746,10 @@ function verifyCertificate(code) {
   };
   // Only a positive is cached, and issuance clears it: a code that is not yet
   // released must start verifying the moment it is.
-  try { cache.put(cacheKey, JSON.stringify(result), 21600); } catch (_) {}
+  // Ten minutes, not six hours. Every write this code makes clears the entry,
+  // but the office's only way to withdraw a certificate is to edit its row by
+  // hand, and that went on verifying as genuine for the rest of the six hours.
+  try { cache.put(cacheKey, JSON.stringify(result), 600); } catch (_) {}
   return result;
 }
 

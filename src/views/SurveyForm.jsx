@@ -323,6 +323,22 @@ export function SurveyForm() {
         // client to rate a fee they cannot see would strand them — every
         // further Submit repeats the same refusal. Fetch the service list
         // again and take them back to the question instead.
+        // The program was withdrawn while the form was open. This copy of the
+        // list still offers it, so without a refresh the client would pick it
+        // again and be refused again.
+        if (result.code === "SERVICE_UNAVAILABLE") {
+          await loadServices(true).catch(() => {});
+          update("serviceId", "");
+          setStep(1);
+          setTurnstileToken("");
+          setTurnstileReset((value) => value + 1);
+          window.scrollTo({ top: 0 });
+          return setError(
+            language === "tl"
+              ? "Hindi na iniaalok ang serbisyong pinili ninyo. Pakipili muli mula sa listahan."
+              : "The service you chose is no longer offered. Please choose again from the list.",
+          );
+        }
         if (result.code === "SQD5_REQUIRED") {
           // Recorded first and independently of the refetch. The refetch is
           // the tidier path — it picks up any other change to the service at
@@ -523,7 +539,7 @@ export function SurveyForm() {
                     </h2>
                     <p>
                       {language === "tl"
-                        ? "Ito ang unang tanong upang malaman namin agad kung maghahanda kami ng sertipiko para sa iyo."
+                        ? "Itinatanong muna namin ito upang malaman agad ng tanggapan kung kailangan kayong ipaghanda ng sertipiko."
                         : "We ask this first so the office knows right away whether to prepare a certificate for you."}
                     </p>
                   </div>
@@ -547,7 +563,7 @@ export function SurveyForm() {
                     {
                       value: "yes",
                       en: "Yes, please issue a Certificate of Appearance.",
-                      tl: "Oo, mangyaring maglabas ng Certificate of Appearance.",
+                      tl: "Oo, mangyaring magbigay ng Certificate of Appearance.",
                     },
                     {
                       value: "no",

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Languages } from "lucide-react";
 import { LANGUAGES } from "../lib/csm";
 import { Tip } from "./ui";
@@ -15,38 +15,71 @@ const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
 export const CHED_LOGO =
   "https://ik.imagekit.io/k2qmtccm6/CHED_Logo_New.png?tr=w-96,q-85,f-auto";
 
+/**
+ * The Sign in and Submit buttons both wait on this, so a check that cannot
+ * appear has to say so. A blocked script used to leave the button disabled
+ * with nothing on screen to explain it, and a render that threw — a mistyped
+ * site key, say — took the whole page down with it.
+ */
 export function TurnstileWidget({ action, onToken, resetKey = 0 }) {
   const container = useRef(null),
-    widgetId = useRef(null);
+    widgetId = useRef(null),
+    [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!TURNSTILE_SITE_KEY) return;
     let cancelled = false;
+    setFailed(false);
+    const fail = () => {
+      if (cancelled) return;
+      setFailed(true);
+      onToken("");
+    };
     const render = () => {
       if (cancelled || !container.current || !window.turnstile) return;
-      if (widgetId.current !== null) window.turnstile.remove(widgetId.current);
-      widgetId.current = window.turnstile.render(container.current, {
-        sitekey: TURNSTILE_SITE_KEY,
-        action,
-        theme: "light",
-        size: "flexible",
-        callback: onToken,
-        "expired-callback": () => onToken(""),
-        "error-callback": () => onToken(""),
-      });
+      try {
+        if (widgetId.current !== null)
+          window.turnstile.remove(widgetId.current);
+        widgetId.current = window.turnstile.render(container.current, {
+          sitekey: TURNSTILE_SITE_KEY,
+          action,
+          theme: "light",
+          size: "flexible",
+          callback: onToken,
+          "expired-callback": () => onToken(""),
+          "error-callback": () => onToken(""),
+        });
+      } catch (error) {
+        console.error("Turnstile could not render:", error);
+        widgetId.current = null;
+        fail();
+      }
     };
     if (window.turnstile) render();
     else {
       let script = document.querySelector('script[data-csm-turnstile="true"]');
+      // A script that failed once stays failed; take it out so this attempt
+      // (a reset, or coming back to the page) loads it afresh.
+      if (script?.dataset.failed === "true") {
+        script.remove();
+        script = null;
+      }
       if (!script) {
-        script = document.createElement("script");
-        script.src =
+        const created = document.createElement("script");
+        created.src =
           "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-        script.async = true;
-        script.defer = true;
-        script.dataset.csmTurnstile = "true";
-        document.head.appendChild(script);
+        created.async = true;
+        created.defer = true;
+        created.dataset.csmTurnstile = "true";
+        created.addEventListener(
+          "error",
+          () => (created.dataset.failed = "true"),
+          { once: true },
+        );
+        document.head.appendChild(created);
+        script = created;
       }
       script.addEventListener("load", render, { once: true });
+      script.addEventListener("error", fail, { once: true });
     }
     return () => {
       cancelled = true;
@@ -61,7 +94,19 @@ export function TurnstileWidget({ action, onToken, resetKey = 0 }) {
         Turnstile is not configured. Add VITE_TURNSTILE_SITE_KEY in Vercel.
       </div>
     );
-  return <div className="turnstile-wrap" ref={container} />;
+  // The container stays mounted either way, so a retry has somewhere to draw.
+  return (
+    <>
+      {failed && (
+        <div className="alert" role="alert">
+          The security check could not load. Check your connection, allow
+          challenges.cloudflare.com if a content blocker is on, then reload the
+          page.
+        </div>
+      )}
+      <div className="turnstile-wrap" ref={container} />
+    </>
+  );
 }
 
 export function Brand({

@@ -125,10 +125,10 @@ export function CertificatePanel({ onError }) {
   // Tracks the filter a response belongs to, so switching tabs quickly cannot
   // leave the slower request's rows sitting under the newer tab.
   const wanted = useRef(status);
-  const load = (nextStatus = status) => {
+  const load = (nextStatus = status, fresh = false) => {
     wanted.current = nextStatus;
     setLoading(true);
-    return getCoaRequests({ status: nextStatus })
+    return getCoaRequests({ status: nextStatus }, { fresh })
       .then((result) => {
         if (wanted.current === nextStatus) setRows(result);
       })
@@ -152,6 +152,7 @@ export function CertificatePanel({ onError }) {
       const result = await generateCoa(
         row.referenceId,
         issueKeyFor(row.referenceId),
+        row.coaStatus,
       );
       // Resolved, so a later deliberate reissue counts as a new attempt.
       clearIssueKey(row.referenceId);
@@ -188,8 +189,15 @@ export function CertificatePanel({ onError }) {
     );
     setEditing(null);
     try {
-      await saveCoaDetails(draft);
-      setNotice("Certificate details saved.");
+      const result = await saveCoaDetails(draft);
+      // A deliberate change: the next issuance is a new attempt, never a
+      // retry of one that timed out before the edit.
+      clearIssueKey(draft.referenceId);
+      setNotice(
+        result?.reissueNeeded
+          ? "Certificate details saved. The certificate already issued — and what verification shows for it — keep the old details until you reissue."
+          : "Certificate details saved.",
+      );
       await load();
     } catch (saveError) {
       setRows(previous);
@@ -228,7 +236,7 @@ export function CertificatePanel({ onError }) {
         >
           <button
             className="mini-button"
-            onClick={() => load()}
+            onClick={() => load(status, true)}
             disabled={loading}
           >
             <RefreshCw size={13} /> {loading ? "Loading…" : "Refresh"}
@@ -285,6 +293,18 @@ export function CertificatePanel({ onError }) {
                         screen. A bubble repeating the text under the cursor
                         would say nothing new. */}
                       {row.coaError && <small>{row.coaError}</small>}
+                      {row.coaStatus === "PROCESSING" && (
+                        <small>
+                          Being issued. If this stays for more than a few
+                          minutes, the attempt was cut off — Generate again.
+                        </small>
+                      )}
+                      {row.detailsChanged && (
+                        <small>
+                          Edited since it was issued — reissue to put the
+                          changes on the certificate.
+                        </small>
+                      )}
                     </td>
                     <td>
                       <div className="row-actions">
@@ -304,9 +324,12 @@ export function CertificatePanel({ onError }) {
                             <ExternalLink size={12} /> PDF
                           </a>
                         )}
+                        {/* Every row, not just the busy one: issue() ignores a
+                            second click while one is running, and a button
+                            that looks live but does nothing reads as broken. */}
                         <button
                           className="mini-button primary"
-                          disabled={busyId === row.referenceId}
+                          disabled={Boolean(busyId)}
                           onClick={() => issue(row)}
                         >
                           <FileSignature size={12} />
@@ -347,6 +370,14 @@ export function CertificatePanel({ onError }) {
               </button>
             </header>
             <div className="modal-body">
+              {editing.coaStatus === "ISSUED" && (
+                <p className="notice full">
+                  This certificate has already been issued. Saving updates the
+                  register only; reissue to send a corrected certificate. A
+                  corrected certificate gets a new verification code, and the
+                  old one stops verifying.
+                </p>
+              )}
               <label>
                 Title
                 <select
@@ -855,7 +886,7 @@ export function ServicesPanel({ onError }) {
           />
         </label>
         <label>
-          Name (Tagalog)
+          Name (Filipino)
           <textarea
             value={form.name_tl}
             onChange={(event) =>
@@ -863,7 +894,7 @@ export function ServicesPanel({ onError }) {
             }
             placeholder="Aplikasyon para sa …"
           />
-          <small>Shown when a client switches the form to Tagalog.</small>
+          <small>Shown when a client switches the form to Filipino.</small>
         </label>
         <div className="field-grid">
           <label>
@@ -1096,15 +1127,22 @@ export function SettingsPanel({ onError, canSign = false }) {
         kind === "template"
           ? await uploadCoaTemplate(file)
           : await uploadSignature(file);
-      const next = {
-        ...settings,
-        [kind === "template" ? "coa_template_id" : "coa_signature_id"]:
-          result.id,
-        [kind === "template" ? "coa_template_name" : "coa_signature_name"]:
-          result.name,
-      };
-      const stored = await saveAdminSettings(next);
-      setSettings(stored);
+      const [idKey, nameKey] =
+        kind === "template"
+          ? ["coa_template_id", "coa_template_name"]
+          : ["coa_signature_id", "coa_signature_name"];
+      // Only the upload's own two keys. Sending the whole form saved whatever
+      // was half-typed in the other fields as a side effect of choosing a
+      // file — including a signatory name nobody had meant to commit yet.
+      const stored = await saveAdminSettings({
+        [idKey]: result.id,
+        [nameKey]: result.name,
+      });
+      setSettings((current) => ({
+        ...current,
+        [idKey]: stored[idKey],
+        [nameKey]: stored[nameKey],
+      }));
       seedCache(cacheKeys.settings, stored);
       setNotice(`${result.name} uploaded.`);
     } catch (uploadError) {
@@ -1280,7 +1318,13 @@ export function UsersPanel({ onError }) {
     setNotice("");
     try {
       await saveAdminUser(form);
-      setNotice(form.user_id ? "User updated." : "User added.");
+      setNotice(
+        !form.user_id
+          ? "User added."
+          : form.password
+            ? "User updated. Any other sessions signed in with the old password have been ended."
+            : "User updated.",
+      );
       setForm(blankUser);
       await load();
     } catch (saveError) {
@@ -1528,6 +1572,7 @@ export function AuditPanel({ onError }) {
                 "USER_SAVE",
                 "TEMPLATE_UPLOAD",
                 "SIGNATURE_UPLOAD",
+                "DATA_RESET",
               ].map((action) => (
                 <option key={action} value={action}>
                   {action}

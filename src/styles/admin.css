@@ -742,7 +742,7 @@ td.numeric,
   grid-template-columns: 1fr 1fr;
   gap: 0 16px;
 }
-.modal-body label.full {
+.modal-body .full {
   grid-column: 1 / -1;
 }
 .modal footer {

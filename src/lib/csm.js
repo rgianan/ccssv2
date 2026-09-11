@@ -1,13 +1,20 @@
 /**
  * Canonical CSM vocabulary shared by the public form, the admin module, and the
  * Apps Script report writer. Every stored value is the English `value` string —
- * Tagalog exists only for display, so switching language never changes the data
+ * Filipino exists only for display, so switching language never changes the data
  * that lands in the sheet or the generated report.
  */
 
+/**
+ * Filipino is the national and official language (1987 Constitution, Art. XIV
+ * §6–7), so that is what the portal calls it. The id stays "tl": it is the
+ * value every translation is keyed by and the one already stored in the
+ * Responses sheet's Language column, and renaming it would split that column
+ * between old and new responses for no visible gain.
+ */
 export const LANGUAGES = [
   { id: "en", label: "English", short: "EN" },
-  { id: "tl", label: "Tagalog", short: "TL" },
+  { id: "tl", label: "Filipino", short: "FIL" },
 ];
 
 /**
@@ -64,7 +71,7 @@ export const SEXES = [
  * `code` is what the CSM Summary Report counts by, and these codes are
  * deliberately unchanged from the portal's earlier, shorter labels — the
  * report's region columns and every response already recorded still line up.
- * The names are proper nouns, so there is no Tagalog variant to fall back to.
+ * The names are proper nouns, so there is no Filipino variant to fall back to.
  */
 export const REGIONS = [
   { value: "National Capital Region", code: "NCR", en: "National Capital Region" },

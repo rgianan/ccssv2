@@ -49,6 +49,13 @@ const adminToken = () => readAdminSession()?.token || "";
  */
 const cacheStore = new Map();
 const inFlight = new Map();
+/**
+ * Bumped by every invalidation. A read already on the wire when a write
+ * invalidated its key used to land afterwards and put the pre-write answer
+ * straight back into the cache — or, after a sign-out, the previous account's
+ * answer. A response is only kept if nothing was invalidated while it was out.
+ */
+let cacheGeneration = 0;
 
 /** Long enough that flicking between tabs is instant, short enough that a
  *  change made in another tab appears without a reload. */
@@ -71,14 +78,19 @@ function cachedCall(key, ttl, run) {
   // Two panels mounting at once must not become two identical round trips.
   const pending = inFlight.get(key);
   if (pending) return pending.then(copyOf);
+  const generation = cacheGeneration;
+  const settle = () => {
+    if (inFlight.get(key) === request) inFlight.delete(key);
+  };
   const request = run()
     .then((value) => {
-      cacheStore.set(key, { at: Date.now(), value });
-      inFlight.delete(key);
+      if (generation === cacheGeneration)
+        cacheStore.set(key, { at: Date.now(), value });
+      settle();
       return value;
     })
     .catch((error) => {
-      inFlight.delete(key);
+      settle();
       throw error;
     });
   inFlight.set(key, request);
@@ -87,8 +99,11 @@ function cachedCall(key, ttl, run) {
 
 /** Drops every entry whose key starts with any of these prefixes. */
 export const invalidate = (...prefixes) => {
-  for (const key of [...cacheStore.keys()])
-    if (prefixes.some((prefix) => key.startsWith(prefix))) cacheStore.delete(key);
+  cacheGeneration++;
+  const matches = (key) => prefixes.some((prefix) => key.startsWith(prefix));
+  for (const key of [...cacheStore.keys()]) if (matches(key)) cacheStore.delete(key);
+  // A read issued after this must not join one issued before it.
+  for (const key of [...inFlight.keys()]) if (matches(key)) inFlight.delete(key);
 };
 
 /**
@@ -100,6 +115,7 @@ export const seedCache = (key, value) =>
   cacheStore.set(key, { at: Date.now(), value });
 
 export const clearCache = () => {
+  cacheGeneration++;
   cacheStore.clear();
   inFlight.clear();
 };
@@ -263,10 +279,20 @@ export const getAdminResponses = (filters = {}) =>
     adminCall("adminGetResponses", { filters }),
   );
 
-export const getCoaRequests = (filters = {}) =>
-  cachedCall(cacheKeys.coaRequests(filters), READ_TTL_MS, () =>
-    adminCall("adminGetCoaRequests", { filters }),
+/**
+ * `fresh` is the Refresh button: it skips this tab's copy and asks the backend
+ * to skip its own, so "Re-read the list from the sheet" does what it says. It
+ * used to be answered from the 60-second cache here like any other read.
+ */
+export const getCoaRequests = (filters = {}, { fresh = false } = {}) => {
+  const key = cacheKeys.coaRequests(filters);
+  if (fresh) invalidate(key);
+  return cachedCall(key, READ_TTL_MS, () =>
+    adminCall("adminGetCoaRequests", {
+      filters: fresh ? { ...filters, fresh: true } : filters,
+    }),
   ).then(listOf);
+};
 
 /**
  * Every write below drops what it invalidates before returning, so the caller's
@@ -279,8 +305,13 @@ export const saveCoaDetails = async (payload) => {
   invalidate("adminGetCoaRequests", "adminGetResponses");
   return result;
 };
-export const generateCoa = async (responseId, issueKey) => {
-  const result = await adminCall("adminGenerateCoa", { responseId, issueKey });
+/** `expectedStatus` is what the list showed when the button was pressed. */
+export const generateCoa = async (responseId, issueKey, expectedStatus = "") => {
+  const result = await adminCall("adminGenerateCoa", {
+    responseId,
+    issueKey,
+    expectedStatus,
+  });
   invalidate("adminGetCoaRequests", "adminGetResponses", "adminGetOverview");
   return result;
 };

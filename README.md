@@ -1,6 +1,6 @@
 # CHED-OSDS Client Satisfaction Measurement Portal
 
-A bilingual (English / Tagalog) Client Satisfaction Measurement portal for the
+A bilingual (English / Filipino) Client Satisfaction Measurement portal for the
 Commission on Higher Education — Office of Student Development and Services,
 with Certificate of Appearance issuance and ARTA-format report generation.
 
@@ -19,7 +19,7 @@ serverless proxy that holds the secrets — with **Vercel** in place of Netlify.
 
 The survey opens with the Certificate of Appearance question, then collects
 client information, the three Citizen's Charter questions, the nine Service
-Quality Dimensions, and optional suggestions. Every question carries its Tagalog
+Quality Dimensions, and optional suggestions. Every question carries its Filipino
 translation beside the English, and a header toggle switches which one leads.
 
 Four main programs are measured separately, and administrators can add more:
@@ -40,7 +40,7 @@ transaction.
 api/gas-proxy.mjs          Vercel function: Turnstile check + Apps Script bridge
 public/                    Static files
 src/
-  lib/csm.js               Questions, regions, scales — English and Tagalog
+  lib/csm.js               Questions, regions, scales — English and Filipino
   lib/api.js               API client and session storage
   router.js                Path-based route selection
   views/LandingPage.jsx    Public landing page
@@ -78,8 +78,10 @@ runs `vercel dev` so `/api/gas-proxy` is served alongside the app.
 3. Run `setupCsmSheets()` once. It creates `Responses`, `Services`,
    `ServiceStats`, `Settings`, `Reports`, `Users`, `Whitelist`, and `Audit`,
    seeds the four main programs plus Other Services, installs a daily
-   `pruneAdminSessions` trigger, and authorizes the Sheets, Drive, Docs, mail,
-   and external-request scopes. It is safe to run again after an update —
+   `pruneAdminSessions` trigger and an on-change trigger (`onSpreadsheetChange`)
+   that keeps the dashboard's cached figures in step with hand edits to the
+   sheet, and authorizes the Sheets, Drive, Docs, mail, and external-request
+   scopes. It is safe to run again after an update —
    existing rows and recognized columns are preserved, missing columns are
    added, and the trigger is not duplicated. **Re-run it after pulling an
    update**, so new columns such as `SubmissionID` and `COAIssueKey` exist.
@@ -180,6 +182,13 @@ issuing; the backend refuses to release an unsigned certificate. Each issued
 certificate is exported to PDF, shared by link, emailed to the client, and
 recorded with a verification code that `/verification` can check.
 
+`/verification` shows the details the certificate was **issued with**, not the
+current values in the register. Editing an issued certificate changes neither
+the client's copy nor what verification says about it; the Certificates page
+marks it as edited until it is reissued. A reissue that prints the same
+details keeps the verification code. One that prints different details gets a
+new code, and the earlier certificate stops verifying.
+
 ## CSM Summary Report
 
 **Reports** generates the ARTA-format workbook for either a quarter
@@ -207,7 +216,12 @@ Generated workbooks are stored in Drive and listed on the Reports page.
 - Every Apps Script request must present the shared token; the backend stores
   only its SHA-256 hash.
 - Admin passwords are salted and iterated SHA-256, never stored in plain text.
-  Sessions expire after six hours and logins throttle after five failures.
+  The hash is computed even for an unknown email, so response time does not
+  reveal which addresses have accounts. Sessions expire after six hours, and
+  changing a password ends every session opened with the old one. Sign-ins
+  throttle after five failures per account and device, and thirty per account
+  across all devices, in any 15 minutes — so a stranger failing on purpose
+  locks out only themselves, not the administrator.
   Expired sessions are swept on each sign-in and by the daily
   `pruneAdminSessions` trigger, so the script property store cannot fill up and
   start refusing new sign-ins.

@@ -65,11 +65,11 @@ const HOW_IT_WORKS = [
     icon: BadgeCheck,
     en: {
       title: "Tell us how we did",
-      body: "Short questions about your visit — how long it took, how you were treated, and whether you got what you needed. In English or Tagalog.",
+      body: "Short questions about your visit — how long it took, how you were treated, and whether you got what you needed. In English or Filipino.",
     },
     tl: {
       title: "Sabihin kung kumusta ang serbisyo",
-      body: "Maiikling tanong tungkol sa iyong pagpunta — gaano ito katagal, kung paano ka trinato, at kung nakuha mo ang kailangan mo. Sa Ingles o Tagalog.",
+      body: "Maiikling tanong tungkol sa iyong pagpunta — gaano ito katagal, kung paano ka trinato, at kung nakuha mo ang kailangan mo. Sa Ingles o Filipino.",
     },
   },
   {
@@ -222,7 +222,7 @@ export function LandingPage() {
             </li>
             <li>
               <Languages size={15} />
-              {language === "tl" ? "Ingles at Tagalog" : "English and Tagalog"}
+              {language === "tl" ? "Ingles at Filipino" : "English and Filipino"}
             </li>
             <li>
               <Lock size={15} />
@@ -353,8 +353,8 @@ export function LandingPage() {
           </h2>
           <p>
             {language === "tl"
-              ? "Piliin ang oo sa unang tanong ng survey. Ihahanda ng OSDS ang iyong Certificate of Appearance at ipapadala ang link sa iyong email."
-              : "Choose yes on the survey's first question. OSDS prepares your Certificate of Appearance and emails you the link once it is signed and released."}
+              ? "Piliin ang oo sa unang tanong ng survey. Ihahanda ng OSDS ang iyong Certificate of Appearance at ipapadala ito sa iyong email."
+              : "Choose yes on the survey's first question. OSDS prepares your Certificate of Appearance and emails it to you once it is signed and released."}
           </p>
           <Tip
             align="start"

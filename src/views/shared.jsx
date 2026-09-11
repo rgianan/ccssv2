@@ -128,7 +128,7 @@ export function LanguageToggle({ language, onChange }) {
   );
 }
 
-/** English stays visible in Tagalog mode and vice versa, so a reader can always
+/** English stays visible in Filipino mode and vice versa, so a reader can always
  *  fall back to the wording they recognize. */
 export function Bilingual({ entry, language, className = "" }) {
   if (!entry) return null;

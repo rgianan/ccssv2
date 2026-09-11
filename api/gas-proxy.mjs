@@ -51,12 +51,21 @@ function readBody(req) {
   if (req.body && typeof req.body === "object")
     return Promise.resolve(JSON.stringify(req.body));
   return new Promise((resolve, reject) => {
-    let raw = "";
+    const chunks = [];
+    let size = 0;
     req.on("data", (chunk) => {
-      raw += chunk;
-      if (raw.length > 6_000_000) reject(new Error("Request body is too large."));
+      size += chunk.length;
+      if (size > 6_000_000) {
+        reject(new Error("Request body is too large."));
+        req.destroy();
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
     });
-    req.on("end", () => resolve(raw));
+    // Joined as bytes and decoded once. Appending each chunk as a string
+    // decoded it on its own, so a character whose UTF-8 bytes straddled a
+    // chunk boundary — the ñ in a client's name — arrived as U+FFFD.
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
@@ -81,12 +90,24 @@ export default async function handler(req, res) {
         "The submit security token is not configured. Set SUBMIT_SHARED_TOKEN in Vercel.",
     });
 
+  // Read and parsed apart from the upstream call below, so a malformed or
+  // oversized request is answered as the caller's error rather than reported
+  // as "Unable to reach Apps Script".
+  let payload;
   try {
     const body = await readBody(req);
-    if (!body || body.length > 6_000_000)
-      return send(res, 400, { ok: false, error: "Invalid request body." });
+    if (body.length > 6_000_000) throw new Error("Request body is too large.");
+    payload = body ? JSON.parse(body) : null;
+  } catch (error) {
+    return send(res, 400, {
+      ok: false,
+      error: /too large/i.test(error.message || "")
+        ? "Request body is too large."
+        : "Invalid JSON request.",
+    });
+  }
 
-    const payload = JSON.parse(body);
+  try {
     if (!payload || typeof payload !== "object" || Array.isArray(payload))
       return send(res, 400, { ok: false, error: "Invalid JSON request." });
 
@@ -100,6 +121,16 @@ export default async function handler(req, res) {
         error:
           "PORTAL_BASE_URL is malformed. Set it to the portal origin, for example https://csm.ched.gov.ph — no path, no trailing slash.",
       });
+
+    // Vercel sets x-real-ip and overwrites x-forwarded-for itself, so neither
+    // can be supplied by the caller.
+    const clientIp = String(
+      req.headers["x-real-ip"] ||
+        req.headers["x-forwarded-for"]?.split(",")[0] ||
+        "",
+    )
+      .trim()
+      .slice(0, 64);
 
     const protectedActions = {
       submitResponse: "client_submit",
@@ -136,13 +167,21 @@ export default async function handler(req, res) {
               turnstileToken,
               replayScopeFor(payload),
             ),
-            remoteip:
-              req.headers["x-real-ip"] ||
-              req.headers["x-forwarded-for"]?.split(",")[0]?.trim(),
+            remoteip: clientIp || undefined,
           }),
           signal: AbortSignal.timeout(8_000),
         },
-      ).then((response) => response.json());
+      )
+        .then((response) => response.json())
+        // Cloudflare unreachable is not "Apps Script unreachable", which is
+        // what the catch below would have said.
+        .catch(() => null);
+      if (!verification)
+        return send(res, 503, {
+          ok: false,
+          error:
+            "Security verification is temporarily unavailable. Please try again.",
+        });
 
       // Cloudflare reports the hostname that solved the challenge; comparing it
       // to the configured origin is what ties a token to this portal. That
@@ -177,9 +216,18 @@ export default async function handler(req, res) {
     // single unauthenticated call was enough to redirect verification to an
     // attacker's domain permanently. An unset variable now sends nothing and
     // the backend keeps what it already has.
+    //
+    // "Sends nothing" has to include the caller's own copy. The browser's JSON
+    // is forwarded as-is, so a request that carried its own portalBaseUrl used
+    // to reach the backend untouched whenever the variable was unset — the
+    // same persistent redirect, one field over from the Host header.
+    delete payload.portalBaseUrl;
     if (portalBaseUrl) payload.portalBaseUrl = portalBaseUrl;
     payload.requestContext = {
       requestId: String(req.headers["x-vercel-id"] || "").slice(0, 100),
+      // Keys the sign-in throttle per device. Used as a hashed cache key only;
+      // the backend never writes it to a sheet or the audit log.
+      clientIp,
     };
 
     const upstream = await fetch(gasUrl, {
@@ -187,7 +235,11 @@ export default async function handler(req, res) {
       headers: { "content-type": "text/plain;charset=utf-8" },
       body: JSON.stringify(payload),
       redirect: "follow",
-      signal: AbortSignal.timeout(60_000),
+      // Under the function's 60s ceiling (vercel.json) with room for the 8s
+      // Turnstile check. At 60s Vercel killed the function first, and the
+      // browser got the platform's error page instead of this function's JSON
+      // — reported as "Redeploy the current Vercel source".
+      signal: AbortSignal.timeout(50_000),
     });
     const responseText = await upstream.text();
     try {

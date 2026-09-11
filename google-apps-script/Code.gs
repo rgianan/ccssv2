@@ -80,20 +80,22 @@ function doPost(e) {
     requestContext = body.requestContext || {};
     delete body.requestContext;
     action = safeTrim_(body.action);
-    auditActor = auditActorForRequest_(action, body);
+    // Only audited actions need an actor. Resolving one validates the session,
+    // so doing it for every read validated each admin request twice.
+    auditActor = isAuditedAction_(action) ? auditActorForRequest_(action, body) : null;
 
     var data;
     if (action === 'getPortalConfig') data = getPortalConfig();
     else if (action === 'submitResponse') data = submitResponse(body.payload || {});
     else if (action === 'verifyCertificate') data = verifyCertificate(body.code);
-    else if (action === 'adminLogin') data = adminLogin(body.email, body.password);
+    else if (action === 'adminLogin') data = adminLogin(body.email, body.password, requestContext);
     else if (action === 'adminLogout') data = adminLogout(body.adminToken);
     else if (action === 'adminValidateSession') data = adminValidateSession(body.adminToken);
     else if (action === 'adminGetOverview') data = adminGetOverview(body.period || {}, body.adminToken);
     else if (action === 'adminGetResponses') data = adminGetResponses(body.filters || {}, body.adminToken);
     else if (action === 'adminGetCoaRequests') data = adminGetCoaRequests(body.filters || {}, body.adminToken);
     else if (action === 'adminSaveCoaDetails') data = adminSaveCoaDetails(body.payload || {}, body.adminToken);
-    else if (action === 'adminGenerateCoa') data = adminGenerateCoa(body.responseId, body.issueKey, body.adminToken);
+    else if (action === 'adminGenerateCoa') data = adminGenerateCoa(body.responseId, body.issueKey, body.adminToken, body.expectedStatus);
     else if (action === 'adminGetServices') data = adminGetServices(body.adminToken);
     else if (action === 'adminSaveService') data = adminSaveService(body.payload || {}, body.adminToken);
     else if (action === 'adminGetServiceStats') data = adminGetServiceStats(body.period || {}, body.adminToken);
@@ -137,7 +139,11 @@ function safeTrim_(v) { return String(v == null ? '' : v).trim(); }
 /** Leading =, +, -, or @ makes Sheets treat stored text as a formula. */
 function safeSheetValue_(v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? ("'" + v) : v; }
 function escapeHtml_(v) { return safeTrim_(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function timezone_() { return Session.getScriptTimeZone() || 'Asia/Manila'; }
+/** Asked once per execution: every call is a round trip out of the script. */
+var SCRIPT_TIME_ZONE_ = null;
+function timezone_() {
+  return SCRIPT_TIME_ZONE_ || (SCRIPT_TIME_ZONE_ = Session.getScriptTimeZone() || 'Asia/Manila');
+}
 
 function getHeaderMap_(sheet) {
   var lastCol = sheet.getLastColumn();
@@ -158,9 +164,59 @@ function idxOf_(headerMap, candidates) {
   return -1;
 }
 
+var MONTH_NAMES_ = ['January','February','March','April','May','June','July',
+  'August','September','October','November','December'];
+
+function isDate_(value) {
+  return Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value);
+}
+
+/**
+ * yyyy-MM-dd or "MMMM d, yyyy", from the Date's own calendar fields.
+ *
+ * Utilities.formatDate is a round trip out of the script, and the response
+ * reads call it for up to three dates in every row — thousands of calls on a
+ * sheet of any size, and the bulk of what made the dashboard's tables slow.
+ * The runtime's local zone is the script's zone (parseDate_ and inPeriod_
+ * already rely on that), so the fields give the same answer for free.
+ */
+function localDateText_(date, kind) {
+  var year = String(date.getFullYear()), month = date.getMonth(), day = date.getDate();
+  while (year.length < 4) year = '0' + year;
+  return kind === 'long'
+    ? MONTH_NAMES_[month] + ' ' + day + ', ' + year
+    : year + '-' + (month < 9 ? '0' : '') + (month + 1) + '-' + (day < 10 ? '0' : '') + day;
+}
+
+/**
+ * Whether localDateText_ agrees with Utilities.formatDate here, checked once
+ * per execution against instants either side of a day boundary. Relying on it
+ * blind would shift every date if the two zones ever differed; where they do,
+ * the formatters below fall back to Utilities and cost what they used to.
+ */
+var LOCAL_DATES_AGREE_ = null;
+function localDatesAgree_() {
+  if (LOCAL_DATES_AGREE_ === null) {
+    try {
+      var zone = timezone_();
+      LOCAL_DATES_AGREE_ = [new Date(), new Date(Date.UTC(2026, 2, 31, 16, 30)),
+        new Date(Date.UTC(2026, 11, 31, 15, 59)), new Date(Date.UTC(2027, 6, 4, 3, 0))]
+        .every(function (date) {
+          return Utilities.formatDate(date, zone, 'yyyy-MM-dd|MMMM d, yyyy') ===
+            localDateText_(date, 'iso') + '|' + localDateText_(date, 'long');
+        });
+    } catch (_) {
+      LOCAL_DATES_AGREE_ = false;
+    }
+    if (!LOCAL_DATES_AGREE_)
+      console.warn('Local date fields disagree with Utilities.formatDate; using the slower path.');
+  }
+  return LOCAL_DATES_AGREE_;
+}
+
 function fmtDate_(value) {
-  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value))
-    return Utilities.formatDate(value, timezone_(), 'yyyy-MM-dd');
+  if (isDate_(value))
+    return localDatesAgree_() ? localDateText_(value, 'iso') : Utilities.formatDate(value, timezone_(), 'yyyy-MM-dd');
   return safeTrim_(value);
 }
 
@@ -177,7 +233,8 @@ function parseDate_(value) {
 
 function longDate_(value) {
   var date = parseDate_(value);
-  return date ? Utilities.formatDate(date, timezone_(), 'MMMM d, yyyy') : safeTrim_(value);
+  if (!date) return safeTrim_(value);
+  return localDatesAgree_() ? localDateText_(date, 'long') : Utilities.formatDate(date, timezone_(), 'MMMM d, yyyy');
 }
 
 function ordinal_(day) {
@@ -191,8 +248,44 @@ function randomSecret_() {
 function sha256Base64_(value) {
   return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(value||''), Utilities.Charset.UTF_8)).replace(/=+$/,'');
 }
+/**
+ * HMAC-SHA256, base64url without padding. Computed in-script where it agrees
+ * with Utilities: the audit log verifies one of these per entry on every
+ * read, so a log of a few thousand rows was a few thousand calls out of the
+ * script each time the Audit tab opened.
+ */
 function hmac256Base64_(value, secret) {
-  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(String(value||''), String(secret||''), Utilities.Charset.UTF_8)).replace(/=+$/,'');
+  value = String(value || ''); secret = String(secret || '');
+  if (fastHmacAgrees_()) {
+    try { return fastHmacText_(value, secret); } catch (_) {}
+  }
+  return utilitiesHmacText_(value, secret);
+}
+
+function utilitiesHmacText_(value, secret) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(value, secret, Utilities.Charset.UTF_8)).replace(/=+$/,'');
+}
+
+function fastHmacText_(value, secret) {
+  return String.fromCharCode.apply(null,
+    base64WebSafeAscii_(hmacSha256Bytes_(utf8Bytes_(value), utf8Bytes_(secret)))).replace(/=+$/, '');
+}
+
+/** Checked once per execution, with a key longer than the block size. */
+var FAST_HMAC_AGREES_ = null;
+function fastHmacAgrees_() {
+  if (FAST_HMAC_AGREES_ === null) {
+    try {
+      var message = 'audit|ü|' + new Array(40).join('row'), key = 'kéy-' + new Array(30).join('secret');
+      FAST_HMAC_AGREES_ = fastHmacText_(message, key) === utilitiesHmacText_(message, key) &&
+        fastHmacText_('x', 'short') === utilitiesHmacText_('x', 'short');
+    } catch (_) {
+      FAST_HMAC_AGREES_ = false;
+    }
+    if (!FAST_HMAC_AGREES_)
+      console.warn('In-script HMAC disagrees with Utilities; using the slower path.');
+  }
+  return FAST_HMAC_AGREES_;
 }
 function constantTimeEquals_(a, b) {
   a = String(a || ''); b = String(b || '');
@@ -228,6 +321,119 @@ function portalBaseUrl_() {
 
 function invalidatePublicCache_() {
   CacheService.getScriptCache().removeAll(['PUBLIC_CSM_CONFIG']);
+}
+
+// ------------------------------- Result cache ---------------------------------
+
+/**
+ * The Overview and Certificates tabs each read and parse the whole Responses
+ * sheet, which grows by a row with every submission. Their answers are small
+ * and change only when the data behind them does, so they are kept in the
+ * script cache under a version that every write to that data replaces. A
+ * write makes the next read recompute; no answer is served that predates a
+ * write this code made.
+ *
+ * Edits made by hand in the spreadsheet are not writes this code sees. The
+ * change trigger setupCsmSheets installs replaces the version for those too,
+ * and the cache lifetime bounds how stale an answer can get without it.
+ */
+var RESULT_CACHE_SECONDS_ = 600;
+var RESULT_VERSION_PROPERTY_ = 'RESULT_CACHE_VERSION';
+/** Characters per cache entry: under the 100 KB value cap even at 3 bytes each. */
+var RESULT_CACHE_CHUNK_ = 30000;
+var RESULT_CACHE_MAX_CHUNKS_ = 60;
+
+function newResultVersion_() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function resultCacheVersion_() {
+  var props = PropertiesService.getScriptProperties();
+  var version = props.getProperty(RESULT_VERSION_PROPERTY_);
+  if (!version) {
+    version = newResultVersion_();
+    props.setProperty(RESULT_VERSION_PROPERTY_, version);
+  }
+  return version;
+}
+
+/** Call after — never before — changing data a cached result is built from. */
+function invalidateResultCache_() {
+  try {
+    PropertiesService.getScriptProperties().setProperty(RESULT_VERSION_PROPERTY_, newResultVersion_());
+  } catch (error) {
+    console.error('Result cache version not replaced: ' + String(error && error.message || error));
+  }
+}
+
+/**
+ * compute(), served from the cache when it can be. The version is read before
+ * the data: a write landing between the two then files its result under a
+ * version already retired, rather than filing pre-write data under the new one.
+ */
+function cachedResult_(name, part, fresh, compute) {
+  var key = 'RESULT_' + resultCacheVersion_() + '_' + name + '_' + part;
+  if (!fresh) {
+    var hit = cacheGetJson_(key);
+    if (hit !== null) return hit;
+  }
+  var value = compute();
+  cachePutJson_(key, value, RESULT_CACHE_SECONDS_);
+  return value;
+}
+
+/** A value split across entries: the head holds the count, #0… the text. */
+function cacheGetJson_(key) {
+  try {
+    var cache = CacheService.getScriptCache(), count = Number(cache.get(key));
+    if (!(count >= 1 && count <= RESULT_CACHE_MAX_CHUNKS_)) return null;
+    var keys = [];
+    for (var i = 0; i < count; i++) keys.push(key + '#' + i);
+    var parts = cache.getAll(keys), text = '';
+    for (var j = 0; j < keys.length; j++) {
+      // Any part evicted on its own makes the whole value a miss.
+      if (typeof parts[keys[j]] !== 'string') return null;
+      text += parts[keys[j]];
+    }
+    return JSON.parse(text);
+  } catch (_) {
+    return null;
+  }
+}
+
+function cachePutJson_(key, value, seconds) {
+  try {
+    var text = JSON.stringify(value), count = Math.max(1, Math.ceil(text.length / RESULT_CACHE_CHUNK_));
+    if (count > RESULT_CACHE_MAX_CHUNKS_) return;          // too large to be worth holding
+    var entries = {};
+    for (var i = 0; i < count; i++)
+      entries[key + '#' + i] = text.slice(i * RESULT_CACHE_CHUNK_, (i + 1) * RESULT_CACHE_CHUNK_);
+    entries[key] = String(count);
+    CacheService.getScriptCache().putAll(entries, seconds);
+  } catch (error) {
+    // Caching is an optimisation; the answer already computed still goes out.
+    console.warn('Result not cached: ' + String(error && error.message || error).slice(0, 120));
+  }
+}
+
+/**
+ * Installed by setupCsmSheets as an on-change trigger. A hand edit anywhere in
+ * the spreadsheet retires cached results and the public programme list;
+ * changes made by this script do not fire it.
+ */
+function onSpreadsheetChange() {
+  invalidateResultCache_();
+  try { invalidatePublicCache_(); } catch (_) {}
+}
+
+/** Idempotent, like ensureDailyTrigger_. */
+function ensureChangeTrigger_(handlerName) {
+  var exists = ScriptApp.getProjectTriggers().some(function (trigger) {
+    return trigger.getHandlerFunction() === handlerName;
+  });
+  if (exists) return false;
+  ScriptApp.newTrigger(handlerName).forSpreadsheet(SpreadsheetApp.getActiveSpreadsheet()).onChange().create();
+  return true;
 }
 
 /**
@@ -297,7 +503,22 @@ function ensureDailyTrigger_(handlerName, atHour) {
   return true;
 }
 
+function formatHeaderRow_(sh) {
+  sh.setFrozenRows(1);
+  if (sh.getLastColumn() > 0)
+    sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold').setBackground('#0032a0').setFontColor('#ffffff');
+}
+
+/**
+ * Sheets already checked in this execution. readSettings_ alone runs several
+ * times in one request, and each pass re-read the header row to learn nothing
+ * new — columns are only ever added, never removed, while a request runs.
+ */
+var ENSURED_SHEETS_ = {};
+
 function ensureSetupSheet_(ss, sheetName, columns) {
+  if (ENSURED_SHEETS_[sheetName])
+    return { sheet: ENSURED_SHEETS_[sheetName], created: false, headersAdded: [] };
   var sh = ss.getSheetByName(sheetName), created = false, added = [];
   if (!sh) { sh = ss.insertSheet(sheetName); created = true; }
   var hdr = getHeaderMap_(sh);
@@ -309,9 +530,12 @@ function ensureSetupSheet_(ss, sheetName, columns) {
       added.push(column.header);
     }
   });
-  sh.setFrozenRows(1);
-  if (sh.getLastColumn() > 0)
-    sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold').setBackground('#0032a0').setFontColor('#ffffff');
+  // Formatting is a write, and this runs on nearly every request — a client's
+  // submission, every settings read, every audit entry. Restyling a header
+  // that has not changed cost a slow write each time, so it now happens only
+  // when this call changed the header. setupCsmSheets restyles all of them.
+  if (created || added.length) formatHeaderRow_(sh);
+  ENSURED_SHEETS_[sheetName] = sh;
   return { sheet: sh, created: created, headersAdded: added };
 }
 
@@ -347,9 +571,21 @@ function responseColumns_() {
     setupColumn_('COALink', ['coa link']),
     setupColumn_('COAIssuedAt', ['coa issued at']),
     setupColumn_('COAIssueKey', ['coa issue key']),
+    setupColumn_('COAIssuedDetails', ['coa issued details']),
     setupColumn_('VerificationCode', ['verification code']),
     setupColumn_('VerificationURL', ['verification url'])
   ]);
+}
+
+/**
+ * Adds any response column this version needs and the sheet lacks, for the
+ * admin paths that write one. setupCsmSheets does the same, but nothing
+ * reminds anyone to re-run it, and writeResponseCells_ skips a missing column
+ * without a word — which for the issued-details snapshot would silently put
+ * verification back to reading the editable fields.
+ */
+function ensureResponseColumns_() {
+  return ensureSetupSheet_(SpreadsheetApp.getActiveSpreadsheet(), SHEET_RESPONSES, responseColumns_()).sheet;
 }
 
 /**
@@ -405,11 +641,28 @@ function setupCsmSheets() {
         String(triggerError && triggerError.message || triggerError).slice(0, 120) +
         ') — add a daily trigger for pruneAdminSessions by hand.';
     }
+    var changeTriggerStatus;
+    try {
+      changeTriggerStatus = ensureChangeTrigger_('onSpreadsheetChange') ? 'installed' : 'already present';
+    } catch (triggerError) {
+      changeTriggerStatus = 'could not be installed (' +
+        String(triggerError && triggerError.message || triggerError).slice(0, 120) +
+        ') — hand edits to the sheet will show on the dashboard within ' + (RESULT_CACHE_SECONDS_ / 60) + ' minutes.';
+    }
+    // The schema may have changed under cached results.
+    invalidateResultCache_();
+
+    // Running setup is the moment to put every header right, including ones
+    // someone restyled by hand; ensureSetupSheet_ no longer does it per call.
+    [responses, services, stats, settings, reports, whitelist, users, audit].forEach(function (result) {
+      formatHeaderRow_(result.sheet);
+    });
 
     return {
       status: 'OK',
       spreadsheetUrl: ss.getUrl(),
       sessionPruneTrigger: triggerStatus,
+      resultCacheTrigger: changeTriggerStatus,
       programsRestored: programsRestored.length ? programsRestored : 'none missing',
       sheets: [responses, services, stats, settings, reports, whitelist, users, audit].map(function (result) {
         return { name: result.sheet.getName(), created: result.created, headersAdded: result.headersAdded };
@@ -606,6 +859,7 @@ function resetCsmData_(confirmation) {
     // The programme list is unchanged, but the public copy of it is cached and
     // a reset is exactly when someone is watching the portal for a change.
     invalidatePublicCache_();
+    invalidateResultCache_();
 
     // One entry, written after the clear, so the log opens with the reset that
     // emptied it rather than with an unexplained gap.
@@ -822,6 +1076,8 @@ function adminSaveService(payload, adminToken) {
     sh.getRange(rowIndex, 1, 1, values.length).setValues([values]);
   } finally { lock.releaseLock(); }
   invalidatePublicCache_();
+  // The overview reads every answer through the fees flag set here.
+  invalidateResultCache_();
   return { status: 'OK', service_id: serviceId, code: code };
 }
 
@@ -931,6 +1187,14 @@ function submitResponse(formData) {
 
   var transactionDate = parseDate_(formData.transactionDate);
   if (!transactionDate) return { status: 'BAD_REQUEST', message: 'A valid transaction date is required.' };
+  // A day the office has not reached yet, or a mistyped year, files the
+  // response under a quarter it does not belong to — and nothing in the report
+  // would show it had been misfiled.
+  var transactionDay = fmtDate_(transactionDate);
+  if (transactionDay > fmtDate_(new Date()))
+    return { status: 'BAD_REQUEST', message: 'The transaction date cannot be in the future.' };
+  if (transactionDay < '2000-01-01')
+    return { status: 'BAD_REQUEST', message: 'Please check the year of the transaction date.' };
 
   // Checked against the official list rather than merely for being non-empty.
   // The report counts by region code and regionCode_ maps anything unrecognised
@@ -1017,6 +1281,10 @@ function submitResponse(formData) {
   var coaTo = parseDate_(formData.coaDateTo);
   if (wantsCoa && (!coaName || !coaAgency || !coaPurpose || !coaFrom))
     return { status: 'BAD_REQUEST', message: 'Complete the Certificate of Appearance details.' };
+  // adminSaveCoaDetails refuses this; the submission let it in, and the
+  // certificate would then print "from August 9 to August 8".
+  if (wantsCoa && coaTo && coaTo < coaFrom)
+    return { status: 'BAD_REQUEST', message: 'The end date of your appearance cannot be earlier than its start.' };
 
   var lock = LockService.getDocumentLock();
   lock.waitLock(20000);
@@ -1072,6 +1340,7 @@ function submitResponse(formData) {
     put(['verificationcode'], wantsCoa ? makeVerificationCode_() : '');
 
     sh.getRange(sh.getLastRow() + 1, 1, 1, lastCol).setValues([row]);
+    invalidateResultCache_();
     return { status: 'OK', referenceId: referenceId, coaRequested: wantsCoa };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
@@ -1112,6 +1381,7 @@ var RESPONSE_FIELDS_ = {
   coaLink: ['coalink','coa link'],
   coaIssuedAt: ['coaissuedat','coa issued at'],
   coaIssueKey: ['coaissuekey','coa issue key'],
+  coaIssuedDetails: ['coaissueddetails','coa issued details'],
   verificationCode: ['verificationcode','verification code'],
   verificationUrl: ['verificationurl','verification url']
 };
@@ -1167,6 +1437,7 @@ function buildResponseRecord_(value, col, rowIndex) {
     coaLink: cellText_(value, col.coaLink),
     coaIssuedAt: cellText_(value, col.coaIssuedAt),
     coaIssueKey: cellText_(value, col.coaIssueKey),
+    coaIssuedDetails: cellText_(value, col.coaIssuedDetails),
     verificationCode: cellText_(value, col.verificationCode),
     verificationUrl: cellText_(value, col.verificationUrl)
   };
@@ -1297,8 +1568,22 @@ function tally_(map, key) {
 function adminGetOverview(periodInput, adminToken) {
   requireAdmin_(adminToken);
   var period = normalizePeriod_(periodInput);
+  return cachedResult_('OVERVIEW', period.key, periodInput && periodInput.fresh === true, function () {
+    return computeOverview_(period);
+  });
+}
+
+function computeOverview_(period) {
   var allRecords = readResponses_().rows;
-  var records = allRecords.filter(function (record) { return inPeriod_(record, period); });
+  // Read through the same answer policy the CSM Summary Report applies (see
+  // applyAnswerPolicy_ in Report.gs). Without it, responses collected before
+  // the fees flag or the Charter rule existed kept their old SQD5 and CC2/CC3
+  // answers here while the report treated them as N/A — so the dashboard and
+  // the filed workbook gave two different scores for the same quarter.
+  var records = applyAnswerPolicy_(
+    allRecords.filter(function (record) { return inPeriod_(record, period); }),
+    readServices_()
+  );
 
   var sqd = {}, cc = {}, clientTypes = {}, sexes = {}, ageBrackets = {}, byService = {};
   SQD_KEYS.forEach(function (key) {
@@ -1326,7 +1611,8 @@ function adminGetOverview(periodInput, adminToken) {
   // Pending certificates are a work queue, not a period statistic: an admin
   // needs to see everything still awaiting release regardless of the filter.
   var coaPending = allRecords.filter(function (record) {
-    return record.coaRequested && record.coaStatus === 'REQUESTED';
+    // PROCESSING too: an issuance cut off mid-run is still unreleased work.
+    return record.coaRequested && (record.coaStatus === 'REQUESTED' || record.coaStatus === 'PROCESSING');
   }).length;
 
   return {
@@ -1491,6 +1777,18 @@ function adminSaveServiceStats(periodInput, rows, adminToken) {
   requireAdmin_(adminToken);
   var period = normalizePeriod_(periodInput);
   if (!Array.isArray(rows)) throw new Error('Invalid statistics payload.');
+  // Counts of people and transactions: whole numbers, or blank for "not
+  // entered". Anything else was stored as text and reached the report as NaN
+  // or a negative total. Checked for every row before any is written, so a
+  // bad figure cannot leave the period half saved.
+  rows.forEach(function (entry) {
+    ['clients', 'transactions'].forEach(function (key) {
+      var value = safeTrim_(entry && entry[key]);
+      if (value && !/^\d{1,9}$/.test(value))
+        throw new Error('Client and transaction counts must be whole numbers of zero or more (' +
+          safeTrim_(entry.code || entry.service_id) + ': "' + value.slice(0, 20) + '").');
+    });
+  });
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) throw new Error('Report statistics are busy. Please try again.');
   try {
@@ -1548,6 +1846,9 @@ function seedUser(email, password, displayName, role, active) {
   put(['name','display name'], displayName || email); put(['role'], role); put(['active'], active);
   if (!row) put(['createdat','created at'], new Date());
   if (row) sh.getRange(row, 1, 1, lastCol).setValues([values]); else sh.appendRow(values);
+  // Sessions validated earlier in this execution were checked against the old
+  // hash; nothing later in it may reuse that answer.
+  ADMIN_SESSION_MEMO_ = {};
   upsertWhitelistUser_({ name: displayName || email, role: role, email: email, active: active });
   return { email: email, name: displayName || email, role: role };
 }
@@ -1634,33 +1935,62 @@ function adminSaveUser(payload, adminToken) {
     var existing = findRowByEmail_(ensureWhitelistSheet_(), email);
     if (!existing && password.length < 12) throw new Error('New users require a password of at least 12 characters.');
     if (password && password.length < 12) throw new Error('Passwords must contain at least 12 characters.');
-    if (password) seedUser(email, password, name, role, active);
+    if (password) {
+      seedUser(email, password, name, role, active);
+      // The new hash ends every session opened with the old one (see
+      // getAdminSession_). A superadmin changing their own password keeps the
+      // tab they did it from, rather than being thrown out mid-save.
+      if (session.email === email) restampAdminSession_(adminToken);
+    }
     else syncCredentialMetadata_({ email: email, name: name, role: role, active: active });
     return upsertWhitelistUser_({ user_id: safeTrim_(payload.user_id), name: name, role: role, email: email, active: active });
   } finally { lock.releaseLock(); }
 }
 
-function adminLogin(email, password) {
+/** Hashed in place of a real salt when the email matches no account. */
+var UNKNOWN_ACCOUNT_SALT_ = 'no-such-account';
+
+/**
+ * Sign-in attempts are counted twice: per account and device (the email plus
+ * the client IP the proxy reports), which is the limit a guesser runs into;
+ * and per account alone, set higher, which caps guessing spread across many
+ * addresses. The single per-account limit of five this replaces let anyone who
+ * knew an administrator's email keep them locked out by failing five times a
+ * quarter-hour — the throttle had become the attack.
+ */
+var LOGIN_DEVICE_LIMIT_ = 5, LOGIN_ACCOUNT_LIMIT_ = 30, LOGIN_WINDOW_SECONDS_ = 900;
+
+function adminLogin(email, password, requestContext) {
   email = safeTrim_(email).toLowerCase();
   password = String(password || '');
-  var throttleKey = adminLoginThrottleKey_(email), cache = CacheService.getScriptCache();
-  var attempts = Number(cache.get(throttleKey) || 0);
-  if (attempts >= 5) throw new Error('Too many sign-in attempts. Try again in 15 minutes.');
-  cache.put(throttleKey, String(attempts + 1), 900);
+  var cache = CacheService.getScriptCache();
+  var clientIp = safeTrim_((requestContext || {}).clientIp).slice(0, 64);
+  var deviceKey = adminLoginThrottleKey_(email + '|' + clientIp), accountKey = adminLoginThrottleKey_(email);
+  var deviceAttempts = Number(cache.get(deviceKey) || 0), accountAttempts = Number(cache.get(accountKey) || 0);
+  if (deviceAttempts >= LOGIN_DEVICE_LIMIT_ || accountAttempts >= LOGIN_ACCOUNT_LIMIT_)
+    throw new Error('Too many sign-in attempts. Try again in 15 minutes.');
+  cache.put(deviceKey, String(deviceAttempts + 1), LOGIN_WINDOW_SECONDS_);
+  cache.put(accountKey, String(accountAttempts + 1), LOGIN_WINDOW_SECONDS_);
 
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_USERS);
-  if (!sh || sh.getLastRow() < 2) throw new Error('Invalid email or password.');
-  var hdr = getHeaderMap_(sh), rows = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
+  var users = readSmallSheet_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_USERS));
+  var hdr = users.header, rows = users.rows;
   var cEmail = idxOf_(hdr, ['email']), cHash = idxOf_(hdr, ['passwordhash','password hash']),
       cSalt = idxOf_(hdr, ['salt']), cName = idxOf_(hdr, ['name','display name']),
       cRole = idxOf_(hdr, ['role']), cActive = idxOf_(hdr, ['active']);
   var match = null;
   for (var i = 0; i < rows.length; i++)
     if (safeTrim_(rows[i][cEmail]).toLowerCase() === email) { match = rows[i]; break; }
+  // Hashed whether or not the account exists. The rounds are the costliest
+  // step of a sign-in, and skipping them for an unknown email made "no such
+  // account" answer measurably sooner than "wrong password" — enough to test a
+  // list of addresses for which ones are administrators. Disabled accounts pay
+  // the same cost for the same reason.
+  var hash = hashAdminPassword_(password, match ? match[cSalt] : UNKNOWN_ACCOUNT_SALT_);
   if (!match || String(match[cActive]).toLowerCase() === 'false' ||
-      !constantTimeEquals_(hashAdminPassword_(password, match[cSalt]), safeTrim_(match[cHash])))
+      !constantTimeEquals_(hash, safeTrim_(match[cHash])))
     throw new Error('Invalid email or password.');
-  cache.remove(throttleKey);
+  cache.remove(deviceKey);
+  cache.remove(accountKey);
 
   // Logins are rare, so this is the natural place to drain a few dead sessions.
   try { pruneAdminSessions_(25); } catch (_) {}
@@ -1668,7 +1998,8 @@ function adminLogin(email, password) {
   var token = Utilities.getUuid().replace(/-/g,'') + Utilities.getUuid().replace(/-/g,'');
   var session = {
     email: email, name: safeTrim_(match[cName]) || email,
-    role: safeTrim_(match[cRole]) || 'admin', expiresAt: Date.now() + 21600000
+    role: safeTrim_(match[cRole]) || 'admin', expiresAt: Date.now() + 21600000,
+    credentialStamp: credentialStamp_(match[cHash])
   };
   var key = adminSessionKey_(token), json = JSON.stringify(session);
   CacheService.getScriptCache().put(key, json, 21600);
@@ -1690,27 +2021,56 @@ function adminValidateSession(token) {
 }
 
 function adminLogout(token) {
+  ADMIN_SESSION_MEMO_[safeTrim_(token)] = null;
   var key = adminSessionKey_(token);
   CacheService.getScriptCache().remove(key);
   PropertiesService.getScriptProperties().deleteProperty(key);
   return true;
 }
 
+/**
+ * One validation per token per execution. An audited action resolves its
+ * actor and then authorises, and each pass was a cache read, four reads of
+ * the Users sheet and a cache write — twice over, for the same answer.
+ */
+var ADMIN_SESSION_MEMO_ = {};
+
 function getAdminSession_(token) {
   token = safeTrim_(token);
   if (!token) return null;
+  if (Object.prototype.hasOwnProperty.call(ADMIN_SESSION_MEMO_, token)) return ADMIN_SESSION_MEMO_[token];
+  return (ADMIN_SESSION_MEMO_[token] = loadAdminSession_(token));
+}
+
+function loadAdminSession_(token) {
   var key = adminSessionKey_(token), cache = CacheService.getScriptCache();
-  var json = cache.get(key) || PropertiesService.getScriptProperties().getProperty(key);
+  var cached = cache.get(key);
+  var json = cached || PropertiesService.getScriptProperties().getProperty(key);
   if (!json) return null;
   try {
     var storedJson = json, session = JSON.parse(json);
     if (!session.expiresAt || session.expiresAt < Date.now()) { adminLogout(token); return null; }
     var current = getCredentialUser_(session.email);
     if (!current || !current.active) { adminLogout(token); return null; }
+    // A session belongs to the password it was opened with. Changing that
+    // password used to leave every existing session running for up to six
+    // hours — including one held by whoever the reset was meant to shut out.
+    // Checked here rather than by sweeping sessions at the change, so a reset
+    // run from the editor through seedUsers() counts too, and a request already
+    // in flight cannot put a revoked session back into the cache.
+    if (!session.credentialStamp ||
+        !constantTimeEquals_(session.credentialStamp, current.credentialStamp)) {
+      adminLogout(token);
+      return null;
+    }
     session.name = current.name;
     session.role = current.role;
     json = JSON.stringify(session);
-    cache.put(key, json, Math.min(21600, Math.max(1, Math.floor((session.expiresAt - Date.now()) / 1000))));
+    // A hit that has not changed is already cached for the rest of its life —
+    // the login put it with the full six hours — so only a miss or a change
+    // needs writing back. Re-putting it was a cache write on every request.
+    if (!cached || json !== storedJson)
+      cache.put(key, json, Math.min(21600, Math.max(1, Math.floor((session.expiresAt - Date.now()) / 1000))));
     if (json !== storedJson) PropertiesService.getScriptProperties().setProperty(key, json);
     return session;
   } catch (_) { return null; }
@@ -1718,18 +2078,44 @@ function getAdminSession_(token) {
 
 function getCredentialUser_(email) {
   email = safeTrim_(email).toLowerCase();
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_USERS);
-  if (!sh || sh.getLastRow() < 2) return null;
-  var hdr = getHeaderMap_(sh), row = findRowByEmail_(sh, email);
-  if (!row) return null;
-  var values = sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0];
+  var users = readSmallSheet_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_USERS));
+  var hdr = users.header, cEmail = idxOf_(hdr, ['email','e-mail']), values = null;
+  for (var i = 0; cEmail >= 0 && i < users.rows.length; i++)
+    if (safeTrim_(users.rows[i][cEmail]).toLowerCase() === email) { values = users.rows[i]; break; }
+  if (!values) return null;
   var cName = idxOf_(hdr, ['name','display name']), cRole = idxOf_(hdr, ['role']), cActive = idxOf_(hdr, ['active']);
+  var cHash = idxOf_(hdr, ['passwordhash','password hash']);
   return {
     email: email,
     name: cName >= 0 ? safeTrim_(values[cName]) || email : email,
     role: cRole >= 0 ? safeTrim_(values[cRole]).toLowerCase() || 'admin' : 'admin',
-    active: cActive < 0 || String(values[cActive]).toLowerCase() !== 'false'
+    active: cActive < 0 || String(values[cActive]).toLowerCase() !== 'false',
+    credentialStamp: cHash >= 0 ? credentialStamp_(values[cHash]) : ''
   };
+}
+
+/**
+ * Identifies which password a session was opened with, without carrying the
+ * hash itself into the session store. seedUser salts afresh on every change,
+ * so even setting the same password again produces a new stamp.
+ */
+function credentialStamp_(passwordHash) {
+  var hash = safeTrim_(passwordHash);
+  return hash ? sha256Base64_('session-credential|' + hash).slice(0, 22) : '';
+}
+
+/** Moves the caller's own session onto their new password. */
+function restampAdminSession_(token) {
+  var key = adminSessionKey_(token), props = PropertiesService.getScriptProperties();
+  var json = props.getProperty(key);
+  if (!json) return;
+  var session = JSON.parse(json), current = getCredentialUser_(session.email);
+  if (!current) return;
+  session.credentialStamp = current.credentialStamp;
+  json = JSON.stringify(session);
+  props.setProperty(key, json);
+  CacheService.getScriptCache().put(key, json,
+    Math.min(21600, Math.max(1, Math.floor((session.expiresAt - Date.now()) / 1000))));
 }
 
 function requireAdmin_(adminToken) {
@@ -1790,12 +2176,171 @@ function adminLoginThrottleKey_(email) {
   return 'LOGIN_ATTEMPTS_' + Utilities.base64EncodeWebSafe(digest).replace(/=+$/,'').slice(0, 32);
 }
 
-/** Iterated SHA-256; Apps Script has no native PBKDF2 or bcrypt. */
+/**
+ * A sheet small enough to read whole — Users, a handful of rows — in one call
+ * rather than the four it takes to locate a row first and then read it.
+ */
+function readSmallSheet_(sh) {
+  var data = sh ? sh.getDataRange().getValues() : [], header = {};
+  (data[0] || []).forEach(function (cell, index) {
+    var key = String(cell || '').trim().toLowerCase();
+    if (key) header[key] = index;
+  });
+  return { header: header, rows: data.slice(1) };
+}
+
+var ADMIN_HASH_ROUNDS_ = 12000;
+
+/**
+ * Iterated SHA-256; Apps Script has no native PBKDF2 or bcrypt. Each round is
+ * base64url(SHA-256(UTF-8(previous))), starting from "salt|password".
+ *
+ * The rounds used to go through Utilities: two calls out of the script per
+ * round, twenty-four thousand per sign-in, and it was that traffic — not the
+ * hashing — that made signing in take seconds. The same rounds now run in the
+ * script itself and produce the same string, so every stored hash still
+ * verifies and the work factor is unchanged. Where the fast path cannot be
+ * shown to agree with Utilities, or cannot encode the input, the original
+ * runs instead: slower, never wrong.
+ */
 function hashAdminPassword_(password, salt) {
-  var value = String(salt || '') + '|' + String(password || '');
-  for (var i = 0; i < 12000; i++)
+  var seed = String(salt || '') + '|' + String(password || '');
+  if (fastHashAgrees_()) {
+    try { return fastHashRounds_(seed, ADMIN_HASH_ROUNDS_); } catch (_) {}
+  }
+  return utilitiesHashRounds_(seed, ADMIN_HASH_ROUNDS_);
+}
+
+function utilitiesHashRounds_(value, rounds) {
+  for (var i = 0; i < rounds; i++)
     value = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8));
   return value;
+}
+
+function fastHashRounds_(value, rounds) {
+  var bytes = utf8Bytes_(value);
+  for (var i = 0; i < rounds; i++) bytes = base64WebSafeAscii_(sha256Bytes_(bytes));
+  return String.fromCharCode.apply(null, bytes);
+}
+
+/** Checked once per execution, on a non-ASCII sample, over a few rounds. */
+var FAST_HASH_AGREES_ = null;
+function fastHashAgrees_() {
+  if (FAST_HASH_AGREES_ === null) {
+    try {
+      var sample = 'sält-ü|pässwörd-✓';
+      FAST_HASH_AGREES_ = fastHashRounds_(sample, 3) === utilitiesHashRounds_(sample, 3);
+    } catch (_) {
+      FAST_HASH_AGREES_ = false;
+    }
+    if (!FAST_HASH_AGREES_)
+      console.warn('In-script SHA-256 disagrees with Utilities; hashing passwords the slower way.');
+  }
+  return FAST_HASH_AGREES_;
+}
+
+/** Throws URIError on a lone surrogate, which sends the caller to Utilities. */
+function utf8Bytes_(text) {
+  var binary = unescape(encodeURIComponent(text)), bytes = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+var BASE64_WEBSAFE_CODES_ = (function () {
+  var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  var codes = new Uint8Array(64);
+  for (var i = 0; i < 64; i++) codes[i] = alphabet.charCodeAt(i);
+  return codes;
+})();
+
+/** base64url with '=' padding, as ASCII codes — the text the next round hashes. */
+function base64WebSafeAscii_(bytes) {
+  var codes = BASE64_WEBSAFE_CODES_, n = bytes.length, out = new Uint8Array(Math.ceil(n / 3) * 4);
+  var o = 0, i = 0, v;
+  for (; i + 2 < n; i += 3) {
+    v = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out[o++] = codes[(v >> 18) & 63]; out[o++] = codes[(v >> 12) & 63];
+    out[o++] = codes[(v >> 6) & 63]; out[o++] = codes[v & 63];
+  }
+  if (n - i === 1) {
+    v = bytes[i] << 16;
+    out[o++] = codes[(v >> 18) & 63]; out[o++] = codes[(v >> 12) & 63]; out[o++] = 61; out[o++] = 61;
+  } else if (n - i === 2) {
+    v = (bytes[i] << 16) | (bytes[i + 1] << 8);
+    out[o++] = codes[(v >> 18) & 63]; out[o++] = codes[(v >> 12) & 63];
+    out[o++] = codes[(v >> 6) & 63]; out[o++] = 61;
+  }
+  return out;
+}
+
+var SHA256_K_ = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+];
+
+/** RFC 2104 HMAC over sha256Bytes_; both arguments are byte arrays. */
+function hmacSha256Bytes_(messageBytes, keyBytes) {
+  if (keyBytes.length > 64) keyBytes = sha256Bytes_(keyBytes);
+  var inner = new Uint8Array(64 + messageBytes.length), outer = new Uint8Array(96);
+  for (var i = 0; i < 64; i++) {
+    var k = i < keyBytes.length ? keyBytes[i] : 0;
+    inner[i] = k ^ 0x36;
+    outer[i] = k ^ 0x5c;
+  }
+  inner.set(messageBytes, 64);
+  outer.set(sha256Bytes_(inner), 64);
+  return sha256Bytes_(outer);
+}
+
+/** FIPS 180-4 SHA-256 over a byte array; returns the 32-byte digest. */
+function sha256Bytes_(bytes) {
+  var length = bytes.length, blocks = ((length + 8) >> 6) + 1, end = blocks * 64;
+  var msg = new Uint8Array(end);
+  msg.set(bytes);
+  msg[length] = 0x80;
+  var bitsHigh = Math.floor(length / 0x20000000), bitsLow = (length << 3) >>> 0;
+  msg[end - 8] = bitsHigh >>> 24; msg[end - 7] = bitsHigh >>> 16; msg[end - 6] = bitsHigh >>> 8; msg[end - 5] = bitsHigh;
+  msg[end - 4] = bitsLow >>> 24; msg[end - 3] = bitsLow >>> 16; msg[end - 2] = bitsLow >>> 8; msg[end - 1] = bitsLow;
+
+  var K = SHA256_K_, w = new Int32Array(64);
+  var h0 = 0x6a09e667, h1 = 0xbb67ae85 | 0, h2 = 0x3c6ef372, h3 = 0xa54ff53a | 0,
+      h4 = 0x510e527f, h5 = 0x9b05688c | 0, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+  for (var offset = 0; offset < end; offset += 64) {
+    var t, x, y;
+    for (t = 0; t < 16; t++) {
+      var p = offset + t * 4;
+      w[t] = (msg[p] << 24) | (msg[p + 1] << 16) | (msg[p + 2] << 8) | msg[p + 3];
+    }
+    for (t = 16; t < 64; t++) {
+      x = w[t - 15]; y = w[t - 2];
+      w[t] = (w[t - 16] +
+        (((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3)) +
+        w[t - 7] +
+        (((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10))) | 0;
+    }
+    var a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (t = 0; t < 64; t++) {
+      var t1 = (h + (((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))) +
+        ((e & f) ^ (~e & g)) + K[t] + w[t]) | 0;
+      var t2 = ((((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))) +
+        ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0;
+    h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + h) | 0;
+  }
+  var digest = new Uint8Array(32), words = [h0, h1, h2, h3, h4, h5, h6, h7];
+  for (var i = 0; i < 8; i++) {
+    digest[i * 4] = words[i] >>> 24; digest[i * 4 + 1] = words[i] >>> 16;
+    digest[i * 4 + 2] = words[i] >>> 8; digest[i * 4 + 3] = words[i];
+  }
+  return digest;
 }
 
 function adminGetSettings(adminToken) {
@@ -1824,13 +2369,15 @@ function adminSaveSettings(settings, adminToken) {
   ].concat(SIGNING_SETTINGS_);
 
   var isSuperadmin = safeTrim_(session.role).toLowerCase() === 'superadmin';
-  var updates = {};
+  var updates = {}, current = null;
   allowed.forEach(function (key) {
     if (!(key in settings)) return;
     var value = safeTrim_(settings[key]).slice(0, 300);
     if (!isSuperadmin && SIGNING_SETTINGS_.indexOf(key) >= 0) {
+      // Read once, not once per signing key.
+      if (current === null) current = readSettings_();
       // Silently dropping it would look like a save that worked.
-      if (value !== safeTrim_(readSettings_()[key]))
+      if (value !== safeTrim_(current[key]))
         throw new Error('Only a superadmin can change the certificate signatory, designation, template or e-signature.');
       return;
     }
@@ -1888,11 +2435,16 @@ function auditTargetForRequest_(action, body) {
 }
 
 function ensureAuditSheet_() {
-  return ensureSetupSheet_(SpreadsheetApp.getActiveSpreadsheet(), SHEET_AUDIT, [
+  var setup = ensureSetupSheet_(SpreadsheetApp.getActiveSpreadsheet(), SHEET_AUDIT, [
     setupColumn_('timestamp'), setupColumn_('audit_id'), setupColumn_('actor_email'), setupColumn_('actor_role'),
     setupColumn_('action'), setupColumn_('target_type'), setupColumn_('target_id'), setupColumn_('outcome'),
     setupColumn_('details'), setupColumn_('request_id'), setupColumn_('previous_hash'), setupColumn_('entry_hash')
-  ]).sheet;
+  ]);
+  // The timestamp is hashed as written. Left to parse as a date, Sheets can
+  // display it back in another shape and every entry then fails the chain
+  // check. setupCsmSheets sets this; a sheet first created here needs it too.
+  if (setup.created) setup.sheet.getRange('A:A').setNumberFormat('@');
+  return setup.sheet;
 }
 
 function auditCanonical_(entry) {

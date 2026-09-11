@@ -96,6 +96,34 @@ function overallStat_(records) {
   return dimensionStat_(values, meanOf_);
 }
 
+/**
+ * The office counts for the Other Services row.
+ *
+ * That row pools the responses of every 'other'-category programme, so its
+ * counts have to pool the same way. It used to take the counts of the first
+ * such programme alone: an office that added a second one entered its figures
+ * on the Reports page and watched them vanish from the filed workbook, beside
+ * a respondent count that did include its clients.
+ *
+ * A count nobody entered stays blank rather than becoming 0, the same as the
+ * per-programme rows, so an unfilled figure does not read as "served nobody".
+ */
+function pooledStat_(serviceList, stats) {
+  var pooled = { clients: '', transactions: '', remarks: '' }, remarks = [];
+  serviceList.forEach(function (service) {
+    var stat = stats[service.service_id];
+    if (!stat) return;
+    ['clients', 'transactions'].forEach(function (key) {
+      if (stat[key] === '' || stat[key] == null) return;
+      pooled[key] = (Number(pooled[key]) || 0) + (Number(stat[key]) || 0);
+    });
+    if (stat.remarks)
+      remarks.push(serviceList.length > 1 ? service.code + ': ' + stat.remarks : stat.remarks);
+  });
+  pooled.remarks = remarks.join('; ');
+  return pooled;
+}
+
 // SQD block on the CSM Summary sheet: column C starts a mean/median pair per SQD.
 var SQD_FIRST_COLUMN_ = 3;
 var OVERALL_COLUMN_ = SQD_FIRST_COLUMN_ + SQD_DIMENSIONS_.length * 2;      // U
@@ -463,11 +491,11 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
       return service.category === 'main' && service.service_id === record.serviceId;
     });
   });
-  var otherService = services.filter(function (service) { return service.category === 'other'; })[0];
-  if (otherRecords.length || otherService)
+  var otherServices = services.filter(function (service) { return service.category === 'other'; });
+  if (otherRecords.length || otherServices.length)
     reportRows.push({
       code: 'OTHER', name: 'Other Services',
-      stat: (otherService && stats[otherService.service_id]) || {},
+      stat: pooledStat_(otherServices, stats),
       records: otherRecords
     });
 
@@ -693,14 +721,18 @@ function buildDataSheet_(ss, records) {
         }))
         .concat([
           record.email,
-          // The Responses sheet stores this escaped, but Sheets treats the
-          // leading apostrophe as formatting and strips it on read — so the
-          // raw text arrives here and would become a live formula in the
-          // workbook an officer opens. Escape again on the way out.
-          safeSheetValue_(record.suggestions),
+          record.suggestions,
           record.referenceId,
           record.transactionDate
-        ]);
+        ])
+        // The Responses sheet stores text escaped, but Sheets treats the
+        // leading apostrophe as formatting and strips it on read — so the raw
+        // text arrives here and would become a live formula in the workbook an
+        // officer opens. Every cell is escaped again on the way out, not just
+        // the free-text ones: the email check admits a value such as
+        // =HYPERLINK("…")&"@x.io", and a cell-by-cell list is exactly how that
+        // one was missed. Numbers pass through unchanged.
+        .map(safeSheetValue_);
     });
     sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }

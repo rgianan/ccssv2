@@ -434,7 +434,11 @@ function OverviewPanel({ period, onError }) {
         </article>
         <article>
           <span>Aware of the Citizen's Charter</span>
-          <strong>{data?.ccAwareness ? `${data.ccAwareness}%` : "—"}</strong>
+          {/* Keyed on there being responses, not on the figure: 0% is a real
+              result, and showing it as "—" read as "no data". */}
+          <strong>
+            {data?.totalResponses ? `${data.ccAwareness ?? 0}%` : "—"}
+          </strong>
           <Tip
             align="end"
             text="Respondents who answered CC1 with one of the first three options — that is, who knew of a Citizen's Charter or saw this office's."

@@ -18,12 +18,26 @@ var COA_OUTPUT_FOLDER_SETTING = 'coa_output_folder_id';
 
 function adminGetCoaRequests(filters, adminToken) {
   requireAdmin_(adminToken);
+  filters = filters || {};
   var wanted = safeTrim_(filters.status).toUpperCase();
+  // Cached per filter; every write to a response row retires it (see
+  // writeResponseCells_). The Refresh button asks for a fresh read.
+  return cachedResult_('COA', wanted || 'ALL', filters.fresh === true, function () {
+    return listCoaRequests_(wanted);
+  });
+}
+
+function listCoaRequests_(wanted) {
   return readResponses_().rows
     .filter(function (record) {
       if (!record.coaRequested) return false;
       if (!wanted) return true;
       if (wanted === 'ERROR') return record.coaStatus.indexOf('ERROR') === 0;
+      // An issuance cut off mid-run (Apps Script's six-minute limit) leaves
+      // the row at PROCESSING, which no tab listed: the request dropped out
+      // of the office's queue with nothing to show it was ever there. It is
+      // still awaiting release, so that is where it is listed.
+      if (wanted === 'REQUESTED') return record.coaStatus === 'REQUESTED' || record.coaStatus === 'PROCESSING';
       return record.coaStatus === wanted;
     })
     .reverse()
@@ -42,7 +56,11 @@ function adminGetCoaRequests(filters, adminToken) {
         coaError: record.coaStatus.indexOf('ERROR') === 0 ? record.coaStatus : '',
         coaLink: record.coaLink,
         coaIssuedAt: record.coaIssuedAt,
-        verificationCode: record.verificationCode
+        verificationCode: record.verificationCode,
+        // Edited after release: the certificate in the client's hands, and
+        // what /verification says, still carry the details it was issued with.
+        detailsChanged: record.coaStatus === 'ISSUED' &&
+          !sameCoaDetails_(issuedCoaDetails_(record), coaDetailsOf_(record))
       };
     });
 }
@@ -63,11 +81,18 @@ function writeResponseCells_(sheet, header, rowIndex, values) {
     var col = idxOf_(header, [name]);
     if (col >= 0) sheet.getRange(rowIndex, col + 1).setValue(safeSheetValue_(values[name]));
   });
+  // Every admin write to a response row comes through here, so this is the
+  // one place that has to retire the cached Overview and Certificates answers.
+  invalidateResultCache_();
 }
 
 function adminSaveCoaDetails(payload, adminToken) {
   requireAdmin_(adminToken);
-  var found = findResponseRow_(payload.referenceId);
+  // The issued-details column may not exist yet on a sheet set up before it
+  // was introduced, and the snapshot below must not be dropped for want of it.
+  ensureResponseColumns_();
+  var found = findResponseRow_(payload.referenceId), record = found.record;
+  var title = safeTrim_(payload.coaTitle).slice(0, 12);
   var name = safeTrim_(payload.coaName).slice(0, 160);
   var agency = safeTrim_(payload.coaAgency).slice(0, 200);
   var purpose = safeTrim_(payload.coaPurpose).slice(0, 300);
@@ -77,17 +102,37 @@ function adminSaveCoaDetails(payload, adminToken) {
     throw new Error('Name, agency, purpose, and the date of appearance are all required.');
   if (to && to < from) throw new Error('The end date cannot be earlier than the start date.');
 
-  writeResponseCells_(found.sheet, found.header, found.record.rowIndex, {
-    coatitle: safeTrim_(payload.coaTitle).slice(0, 12),
+  var cells = {
+    coatitle: title,
     coaname: name,
     coaagency: agency,
     coapurpose: purpose,
     coadatefrom: Utilities.formatDate(from, timezone_(), 'yyyy-MM-dd'),
     coadateto: to ? Utilities.formatDate(to, timezone_(), 'yyyy-MM-dd') : ''
+  };
+  // Once a certificate is issued, these fields describe the next one, not the
+  // one the client holds. What that one printed is kept apart so /verification
+  // goes on describing it: editing the register used to change the
+  // verification page at once, so a certificate carrying the old details was
+  // "verified" against new ones it does not show. A row issued before the
+  // snapshot existed gets it here, from its values as they stand before this
+  // edit — which is what was printed, unless it was edited before this version.
+  if (record.coaStatus === 'ISSUED' && !record.coaIssuedDetails)
+    cells.coaissueddetails = JSON.stringify(coaDetailsOf_(record));
+  writeResponseCells_(found.sheet, found.header, record.rowIndex, cells);
+  // Cheap, and keeps a cached answer from outliving any change to the row.
+  invalidateCertificateCache_(record.verificationCode);
+
+  var edited = coaDetailsOf_({
+    coaTitle: title, coaName: name, coaAgency: agency, coaPurpose: purpose,
+    coaDateFrom: from, coaDateTo: to
   });
-  // These details are what /verification shows, so a cached answer is now stale.
-  invalidateCertificateCache_(found.record.verificationCode);
-  return { status: 'OK', referenceId: found.record.referenceId };
+  return {
+    status: 'OK',
+    referenceId: record.referenceId,
+    reissueNeeded: record.coaStatus === 'ISSUED' &&
+      !sameCoaDetails_(issuedCoaDetails_(record), edited)
+  };
 }
 
 // ------------------------------- Formatting -----------------------------------
@@ -96,7 +141,7 @@ function adminSaveCoaDetails(payload, adminToken) {
 function dateCoverage_(from, to) {
   var start = parseDate_(from), end = parseDate_(to);
   if (!start) return '';
-  if (!end || Utilities.formatDate(end, timezone_(), 'yyyy-MM-dd') === Utilities.formatDate(start, timezone_(), 'yyyy-MM-dd'))
+  if (!end || fmtDate_(end) === fmtDate_(start))
     return 'on ' + longDate_(start);
   return 'from ' + longDate_(start) + ' to ' + longDate_(end);
 }
@@ -104,6 +149,36 @@ function dateCoverage_(from, to) {
 /** Reads naturally after "Issued this ". */
 function issuedPhrase_(date) {
   return ordinal_(date.getDate()) + ' day of ' + Utilities.formatDate(date, timezone_(), 'MMMM yyyy');
+}
+
+var COA_DETAIL_KEYS_ = ['name', 'agency', 'purpose', 'dateCoverage'];
+
+/** What a certificate prints, in the shape /verification shows it. */
+function coaDetailsOf_(fields) {
+  return {
+    name: safeTrim_(safeTrim_(fields.coaTitle) + ' ' + safeTrim_(fields.coaName)),
+    agency: safeTrim_(fields.coaAgency),
+    purpose: safeTrim_(fields.coaPurpose),
+    dateCoverage: dateCoverage_(fields.coaDateFrom, fields.coaDateTo)
+  };
+}
+
+/**
+ * What the certificate currently in circulation printed. Recorded at issuance;
+ * a row issued before that record existed falls back to its live fields, which
+ * is all there is to go on for it.
+ */
+function issuedCoaDetails_(record) {
+  var stored = null;
+  try { stored = JSON.parse(record.coaIssuedDetails || 'null'); } catch (_) {}
+  if (!stored || typeof stored !== 'object') return coaDetailsOf_(record);
+  var details = {};
+  COA_DETAIL_KEYS_.forEach(function (key) { details[key] = safeTrim_(stored[key]); });
+  return details;
+}
+
+function sameCoaDetails_(a, b) {
+  return COA_DETAIL_KEYS_.every(function (key) { return safeTrim_(a[key]) === safeTrim_(b[key]); });
 }
 
 // ---------------------------- Document plumbing --------------------------------
@@ -205,23 +280,25 @@ function driveExportPdf_(fileId) {
  * one clicking again after the proxy's 60s timeout while the first pass is
  * still running, would otherwise each mint a PDF and email the client.
  */
-function adminGenerateCoa(responseId, issueKey, adminToken) {
+function adminGenerateCoa(responseId, issueKey, adminToken, expectedStatus) {
   requireAdmin_(adminToken);
   // Resolve the output folder before taking the lock: creating it writes to
   // Settings, which acquires and releases this same script lock, and that
   // nested release would drop the guard for the rest of the issuance.
   var outputFolder = getOrCreateFolder_(COA_OUTPUT_FOLDER_SETTING, 'OSDS Certificates of Appearance');
+  // Issuance records what it printed; that write needs its column to exist.
+  ensureResponseColumns_();
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(45000))
     throw new Error('Another certificate is being issued right now. Wait a moment, then refresh the list before trying again.');
   try {
-    return issueCoa_(responseId, safeTrim_(issueKey).slice(0, 64), outputFolder);
+    return issueCoa_(responseId, safeTrim_(issueKey).slice(0, 64), outputFolder, expectedStatus);
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
 }
 
-function issueCoa_(responseId, issueKey, outputFolder) {
+function issueCoa_(responseId, issueKey, outputFolder, expectedStatus) {
   var found = findResponseRow_(responseId), record = found.record;
   // A reissue that fails must not erase the fact that a valid certificate is
   // already in the client's hands, so remember what the register said first.
@@ -231,14 +308,34 @@ function issueCoa_(responseId, issueKey, outputFolder) {
   // carries the key of the attempt that timed out. Reissuing is a real feature,
   // so it cannot be blocked outright — but the same attempt, retried, hands
   // back the certificate that already went out instead of minting a second one
-  // and emailing the client twice. A deliberate reissue arrives with a new key.
-  if (issueKey && record.coaIssueKey === issueKey && record.coaStatus === 'ISSUED')
+  // and emailing the client twice. A deliberate reissue arrives with a new key
+  // — and so, in effect, does one after an edit: a retry is only a retry while
+  // the certificate it would produce is the one already sent.
+  if (issueKey && record.coaIssueKey === issueKey && record.coaStatus === 'ISSUED' &&
+      sameCoaDetails_(issuedCoaDetails_(record), coaDetailsOf_(record)))
     return {
       status: 'OK',
       referenceId: record.referenceId,
       certificateUrl: record.coaLink,
       verificationCode: record.verificationCode,
       emailStatus: 'This certificate was already issued and emailed on ' + (record.coaIssuedAt || 'an earlier attempt') + '.',
+      duplicate: true
+    };
+
+  // The list the administrator clicked from said this was not issued yet; the
+  // register now says it is. Another administrator got there first, or an
+  // earlier click was still running while this one waited on the lock. The
+  // issue key cannot catch either — each click carries its own — and going
+  // ahead would mail the client a second copy of the same certificate.
+  var expected = safeTrim_(expectedStatus).toUpperCase();
+  if (expected && expected !== 'ISSUED' && record.coaStatus === 'ISSUED')
+    return {
+      status: 'OK',
+      referenceId: record.referenceId,
+      certificateUrl: record.coaLink,
+      verificationCode: record.verificationCode,
+      emailStatus: 'It had already been issued' + (record.coaIssuedAt ? ' on ' + record.coaIssuedAt : '') +
+        ' by another request, so nothing was sent again.',
       duplicate: true
     };
 
@@ -261,7 +358,20 @@ function issueCoa_(responseId, issueKey, outputFolder) {
     var docName = ('COA - ' + record.coaName + ' - ' + record.referenceId).slice(0, 180);
     var docId = createCoaWorkingCopy_(templateId, docName, outputFolder);
 
-    var verificationCode = record.verificationCode || makeVerificationCode_();
+    // A reissue that prints the same details keeps the code, so the earlier
+    // copy — identical — goes on verifying. One that prints different details
+    // gets a new code: the earlier copy no longer matches the register, and
+    // verification is the one place a stranger checks that it does. Reusing
+    // the code regardless left the outdated certificate verifying for good.
+    var printed = coaDetailsOf_(record);
+    var previousCode = record.verificationCode;
+    var superseded = previousStatus === 'ISSUED' && !!previousCode &&
+      !sameCoaDetails_(issuedCoaDetails_(record), printed);
+    var verificationCode = superseded || !previousCode ? makeVerificationCode_() : previousCode;
+    var supersededNote = superseded
+      ? 'The details changed, so this certificate has a new verification code and the earlier one (' +
+        previousCode + ') no longer verifies.'
+      : '';
     var baseUrl = portalBaseUrl_();
     var verificationUrl = baseUrl ? baseUrl + '/verification?code=' + encodeURIComponent(verificationCode) : '';
     // Worth saying out loud: without it the QR code and verification link are
@@ -323,11 +433,14 @@ function issueCoa_(responseId, issueKey, outputFolder) {
       coalink: certificateUrl,
       coaissuedat: Utilities.formatDate(issuedOn, timezone_(), 'yyyy-MM-dd HH:mm'),
       coaissuekey: issueKey,
+      coaissueddetails: JSON.stringify(printed),
       verificationcode: verificationCode,
       verificationurl: verificationUrl
     });
     SpreadsheetApp.flush();
     invalidateCertificateCache_(verificationCode);
+    // A positive answer for the retired code may be cached for hours.
+    if (superseded) invalidateCertificateCache_(previousCode);
 
     // The certificate exists and is recorded; a mail failure is worth
     // reporting but must not roll the record back to ERROR.
@@ -354,7 +467,7 @@ function issueCoa_(responseId, issueKey, outputFolder) {
       referenceId: record.referenceId,
       certificateUrl: certificateUrl,
       verificationCode: verificationCode,
-      emailStatus: safeTrim_([setupNote, emailStatus].join(' '))
+      emailStatus: safeTrim_([setupNote, supersededNote, emailStatus].join(' '))
     };
   } catch (error) {
     // A failed first issuance leaves ERROR for the admin to act on. A failed
@@ -613,13 +726,17 @@ function verifyCertificate(code) {
   var record = findResponseByColumn_(sh, col, col.verificationCode, code);
   if (!record || record.coaStatus !== 'ISSUED') return { valid: false };
 
+  // What the certificate printed, not what the register says now — the two
+  // part company when details are edited after release (see
+  // adminSaveCoaDetails), and only the first describes the document in hand.
+  var shown = issuedCoaDetails_(record);
   var result = {
     valid: true,
     verificationCode: code,
-    name: safeTrim_(record.coaTitle + ' ' + record.coaName),
-    agency: record.coaAgency,
-    purpose: record.coaPurpose,
-    dateCoverage: dateCoverage_(record.coaDateFrom, record.coaDateTo),
+    name: shown.name,
+    agency: shown.agency,
+    purpose: shown.purpose,
+    dateCoverage: shown.dateCoverage,
     issuedAt: record.coaIssuedAt
     // Deliberately no certificate link. The stored one points into the office's
     // Drive, which opens for staff and shows "Request access" to everybody

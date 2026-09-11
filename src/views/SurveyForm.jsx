@@ -15,7 +15,6 @@ import {
   CLIENT_TYPES,
   COPY,
   COURTESY_TITLES,
-  OTHER_SERVICE_CODE,
   REGIONS,
   SEXES,
   SQD_SCALE,
@@ -203,7 +202,11 @@ export function SurveyForm() {
 
   const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const selectedService = services.find((s) => s.service_id === form.serviceId);
-  const isOtherService = selectedService?.code === OTHER_SERVICE_CODE;
+  // By category, the same test the backend applies when it demands the
+  // "please specify" text. Keyed on the OTHER code, a program an administrator
+  // added under Other services never showed the field, and the client was
+  // refused at Submit for leaving blank a box they had never been shown.
+  const isOtherService = selectedService?.category === "other";
   const wantsCoa = form.wantsCoa === "yes";
 
   /**
@@ -241,15 +244,22 @@ export function SurveyForm() {
           form.coaPurpose.trim() &&
           form.coaDateFrom)
       );
+    // The same rules the backend applies. Looser ones here let "a@b@c.d", an
+    // age of 25.5 or a future date through every step, only for Submit to be
+    // refused at the end, with the field that caused it three steps back.
     if (step === 1)
       return (
-        /^\S+@\S+\.\S+$/.test(form.email) &&
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
         form.clientType &&
         form.transactionDate &&
+        form.transactionDate <= portalToday() &&
         form.region &&
         form.serviceId &&
         (!isOtherService || form.otherService.trim()) &&
-        (!form.age || (Number(form.age) >= 1 && Number(form.age) <= 120))
+        (!form.age ||
+          (/^\d{1,3}$/.test(form.age) &&
+            Number(form.age) >= 1 &&
+            Number(form.age) <= 120))
       );
     if (step === 2)
       return ccApplicable(cc).every((question) => cc[question.id]);
@@ -378,8 +388,8 @@ export function SurveyForm() {
                 </strong>
                 <span>
                   {language === "tl"
-                    ? `Ipapadala ng OSDS ang link sa ${form.email} kapag nalagdaan na ito.`
-                    : `OSDS will email the signed certificate link to ${form.email}.`}
+                    ? `Ipapadala ng OSDS ang sertipiko sa ${form.email} kapag nalagdaan na ito.`
+                    : `OSDS will email the signed certificate to ${form.email}.`}
                 </span>
               </div>
             </div>
@@ -704,6 +714,7 @@ export function SurveyForm() {
                     <b>*</b>
                     <input
                       type="date"
+                      max={portalToday()}
                       value={form.transactionDate}
                       onChange={(event) =>
                         update("transactionDate", event.target.value)

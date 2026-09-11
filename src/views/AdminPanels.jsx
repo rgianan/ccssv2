@@ -1482,6 +1482,29 @@ export function UsersPanel({ onError }) {
 
 // --------------------------------- Audit -------------------------------------
 
+/**
+ * Where the chain broke and what that means, from the first break the backend
+ * found. "A row may have been edited or deleted" left the reader to search a
+ * sheet of hundreds of rows for a change that might not exist.
+ */
+function describeChainBreak(broken) {
+  const where = broken?.row
+    ? `Row ${broken.row} of the Audit sheet${broken.auditId ? ` (${broken.auditId})` : ""}`
+    : "";
+  switch (broken?.reason) {
+    case "contents":
+      return `${where} no longer matches what was recorded — it was edited in Google Sheets after it was written.`;
+    case "link":
+      return `${where} does not follow the entry above it — an entry between them was deleted, inserted or moved.`;
+    case "head":
+      return "The log ends before the most recent entry that was recorded — the last rows were deleted or cleared.";
+    case "secret":
+      return "The audit signing key is missing from the script properties, so no entry can be checked.";
+    default:
+      return "A row may have been edited or deleted directly in Google Sheets.";
+  }
+}
+
 export function AuditPanel({ onError }) {
   const [data, setData] = useState(null),
     [filters, setFilters] = useState({
@@ -1630,8 +1653,8 @@ export function AuditPanel({ onError }) {
               </>
             ) : (
               <>
-                The audit hash chain does not match. A row may have been edited
-                or deleted directly in Google Sheets.
+                The audit hash chain does not match.{" "}
+                {describeChainBreak(data.integrity.broken)}
               </>
             )}
           </div>

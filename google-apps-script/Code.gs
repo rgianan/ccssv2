@@ -2468,6 +2468,26 @@ function ensureAuditSheet_() {
   return setup.sheet;
 }
 
+/** The spreadsheet's zone: the one Sheets used when it read text as a date. */
+function spreadsheetTimeZone_() {
+  try {
+    return SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone() || timezone_();
+  } catch (_) {
+    return timezone_();
+  }
+}
+
+/**
+ * An audit cell as the text that was hashed. Every field is written as text;
+ * a Date here is a timestamp Sheets parsed on the way in, and formatting it
+ * back in the spreadsheet's zone with the pattern it was written in recovers
+ * the original string exactly, seconds included.
+ */
+function auditCellText_(value, zone) {
+  if (isDate_(value)) return Utilities.formatDate(value, zone, 'yyyy-MM-dd HH:mm:ss');
+  return safeTrim_(value);
+}
+
 function auditCanonical_(entry) {
   return [entry.timestamp, entry.audit_id, entry.actor_email, entry.actor_role, entry.action,
     entry.target_type, entry.target_id, entry.outcome, entry.details, entry.request_id, entry.previous_hash]
@@ -2526,7 +2546,17 @@ function appendAuditForRequest_(action, body, success, errorMessage, actor, requ
     entry.entry_hash = hmac256Base64_(auditCanonical_(entry), secret);
     var row = new Array(sh.getLastColumn()).fill('');
     Object.keys(entry).forEach(function (key) { if (key in hdr) row[hdr[key]] = safeSheetValue_(entry[key]); });
-    sh.appendRow(row);
+    // The timestamp cell is made plain text before the row goes in. appendRow
+    // let Sheets read "2026-09-12 14:03:07" as a date, and a date is displayed
+    // in the sheet's own date format rather than as the string that was
+    // hashed — so an entry nobody had touched failed the chain check. The
+    // column-wide format setupCsmSheets applies reaches only the rows that
+    // existed then, and only a sheet laid out with the timestamp in column A.
+    var targetRow = lastRow + 1;
+    if (targetRow > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 100);
+    var cTime = idxOf_(hdr, ['timestamp']);
+    if (cTime >= 0) sh.getRange(targetRow, cTime + 1).setNumberFormat('@');
+    sh.getRange(targetRow, 1, 1, row.length).setValues([row]);
     PropertiesService.getScriptProperties().setProperty('AUDIT_HEAD_HASH', entry.entry_hash);
   } catch (writeError) {
     recordAuditDrop_(action, String(writeError && writeError.message || writeError).slice(0, 120));
@@ -2550,24 +2580,44 @@ function adminGetAuditLog(filters, adminToken) {
       integrity: { valid: !expectedHead && !dropped, checkedRows: 0, dropped: dropped, droppedLast: droppedLast }
     };
   var hdr = getHeaderMap_(sh);
-  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getDisplayValues();
+  // Raw values, not display values. A cell Sheets turned into a date or a
+  // number is displayed in whatever format the sheet applies to it, which is
+  // not the text that was hashed; the raw value can be put back into exactly
+  // that text. This is what let an intact log report a broken chain.
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
+  var zone = spreadsheetTimeZone_();
   var secret = props.getProperty('AUDIT_HASH_SECRET') || '';
-  var integrity = true, previousShown = null;
-  var entries = rows.map(function (row) {
-    function cell(name) { return name in hdr ? safeTrim_(row[hdr[name]]) : ''; }
-    return {
+  var broken = null, previousShown = null, entries = [];
+  rows.forEach(function (row, index) {
+    // Wholly blank rows are skipped rather than checked as empty entries.
+    // That hides nothing: an entry cleared by hand still breaks the link of
+    // the entry after it, or the head check if it was the last.
+    if (row.every(function (value) { return safeTrim_(value) === ''; })) return;
+    function cell(name) { return name in hdr ? auditCellText_(row[hdr[name]], zone) : ''; }
+    entries.push({
+      sheetRow: index + 2,
       timestamp: cell('timestamp'), audit_id: cell('audit_id'), actor_email: cell('actor_email'),
       actor_role: cell('actor_role'), action: cell('action'), target_type: cell('target_type'),
       target_id: cell('target_id'), outcome: cell('outcome'), details: cell('details'),
       request_id: cell('request_id'), previous_hash: cell('previous_hash'), entry_hash: cell('entry_hash')
-    };
+    });
   });
+  // The first break is reported by row and kind, so "the chain does not
+  // match" can be traced to the row that caused it.
   entries.forEach(function (entry) {
-    if (!secret || !constantTimeEquals_(hmac256Base64_(auditCanonical_(entry), secret), entry.entry_hash) ||
-        (previousShown !== null && entry.previous_hash !== previousShown)) integrity = false;
+    if (!broken) {
+      if (!secret)
+        broken = { reason: 'secret', row: entry.sheetRow, auditId: entry.audit_id };
+      else if (!constantTimeEquals_(hmac256Base64_(auditCanonical_(entry), secret), entry.entry_hash))
+        broken = { reason: 'contents', row: entry.sheetRow, auditId: entry.audit_id };
+      else if (previousShown !== null && entry.previous_hash !== previousShown)
+        broken = { reason: 'link', row: entry.sheetRow, auditId: entry.audit_id };
+    }
     previousShown = entry.entry_hash;
   });
-  if (expectedHead && previousShown !== expectedHead) integrity = false;
+  if (!broken && expectedHead && previousShown !== expectedHead)
+    broken = { reason: 'head', row: null, auditId: '' };
+  var integrity = !broken;
 
   var action = safeTrim_(filters.action).toUpperCase(), outcome = safeTrim_(filters.outcome).toUpperCase();
   var query = safeTrim_(filters.query).toLowerCase();
@@ -2578,12 +2628,13 @@ function adminGetAuditLog(filters, adminToken) {
   var limit = Math.min(500, Math.max(25, Number(filters.limit) || 200));
   return {
     entries: filtered.slice(-limit).reverse().map(function (entry) {
-      delete entry.previous_hash; delete entry.entry_hash;
+      delete entry.previous_hash; delete entry.entry_hash; delete entry.sheetRow;
       try { entry.details = JSON.parse(entry.details || '{}'); } catch (_) { entry.details = {}; }
       return entry;
     }),
     integrity: {
       valid: integrity && !dropped,
+      broken: broken,
       checkedRows: entries.length,
       dropped: dropped,
       droppedLast: droppedLast

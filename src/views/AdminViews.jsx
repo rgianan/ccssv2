@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
+  Bell,
   ClipboardList,
   FileSignature,
   FileSpreadsheet,
@@ -19,6 +20,7 @@ import {
   adminLogout,
   getAdminOverview,
   getAdminResponses,
+  getCoaRequests,
   readAdminSession,
   storeAdminSession,
   validateAdminSession,
@@ -175,6 +177,187 @@ const PAGE_COPY = {
   audit: ["Audit log", "Review administrator access and privileged changes."],
 };
 
+/**
+ * Certificates waiting to be released, for the bell in the header.
+ *
+ * Asked for through getCoaRequests — the same read the Certificates tab makes
+ * — so the poll and the panel share one cached answer instead of two round
+ * trips for the same list, and opening the tab from the bell shows rows that
+ * are already in hand. "REQUESTED" is the backend's own grouping, so it also
+ * carries rows left at PROCESSING by an issuance that was cut off: still
+ * unreleased work, and the reason a queue counting only REQUESTED could read
+ * as empty while a client waited.
+ */
+const PENDING_POLL_MS = 120_000;
+
+/** Per administrator: two people signing in from one machine keep their own. */
+const seenKey = (email) => `csm.coa.seen.${String(email || "").toLowerCase()}`;
+
+const readSeen = (email) => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(seenKey(email)) || "[]");
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    // A private window, or site data the browser refuses. The count is still
+    // right; everything pending simply reads as new on each visit.
+    return [];
+  }
+};
+
+function usePendingCertificates(email, active) {
+  const [pending, setPending] = useState([]),
+    [seen, setSeen] = useState(() => readSeen(email)),
+    [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    setSeen(readSeen(email));
+  }, [email]);
+
+  useEffect(() => {
+    if (!active) return;
+    let stale = false;
+    const poll = () =>
+      getCoaRequests({ status: "REQUESTED" })
+        .then((rows) => {
+          if (!stale) setPending(rows);
+        })
+        // Deliberately silent. A count that could not be fetched is not worth
+        // an error banner across whatever page the administrator is working
+        // on, and reporting it through handleError would sign them out on an
+        // expired session before the panel in front of them could say so.
+        .catch(() => {});
+    poll();
+    const timer = setInterval(poll, PENDING_POLL_MS);
+    // Coming back to the tab is exactly when a stale count gets noticed.
+    const onFocus = () => poll();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      stale = true;
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [active, tick]);
+
+  return {
+    pending,
+    unseen: pending.filter((row) => !seen.includes(row.referenceId)),
+    /** Refetch now — after an issuance, rather than up to two minutes later. */
+    refresh: () => setTick((value) => value + 1),
+    markSeen: () => {
+      // The queue as it stands, not everything ever seen: a request that
+      // leaves the queue never returns to it, so this cannot miss a new one
+      // and cannot grow without bound either.
+      const ids = pending.map((row) => row.referenceId);
+      setSeen(ids);
+      try {
+        localStorage.setItem(seenKey(email), JSON.stringify(ids));
+      } catch {
+        /* See readSeen. */
+      }
+    },
+  };
+}
+
+function CertificateBell({ pending, unseen, onOpen, onMarkSeen }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event) => {
+      if (!wrap.current?.contains(event.target)) setOpen(false);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const count = pending.length;
+  // The whole state in one string: a screen reader gets from the button what
+  // the badge and the dot show everybody else.
+  const label = count
+    ? `Certificates: ${count} waiting to be issued${
+        unseen.length ? `, ${unseen.length} new since you last looked` : ""
+      }`
+    : "Certificates: none waiting to be issued";
+
+  return (
+    <div className="bell-wrap" ref={wrap}>
+      <button
+        type="button"
+        className={`bell${count ? " has-pending" : ""}${unseen.length ? " has-new" : ""}`}
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => {
+          // Opening it is what counts as having looked.
+          if (!open) onMarkSeen();
+          setOpen((value) => !value);
+        }}
+      >
+        <Bell size={17} />
+        {count > 0 && (
+          <span className="bell-count">{count > 99 ? "99+" : count}</span>
+        )}
+      </button>
+      {open && (
+        <div
+          className="bell-panel"
+          role="dialog"
+          aria-label="Certificates waiting to be issued"
+        >
+          <header>
+            <strong>Waiting to be issued</strong>
+            <small>
+              {count
+                ? `${count} in the queue${unseen.length ? ` · ${unseen.length} new` : ""}`
+                : "Nothing in the queue"}
+            </small>
+          </header>
+          {count === 0 ? (
+            <p className="bell-empty">
+              Every certificate a client has asked for has been released.
+            </p>
+          ) : (
+            <ul>
+              {pending.slice(0, 5).map((row) => (
+                <li key={row.referenceId}>
+                  <strong>
+                    {[row.coaTitle, row.coaName].filter(Boolean).join(" ") ||
+                      row.referenceId}
+                  </strong>
+                  <small>
+                    {row.coaAgency || "No agency recorded"}
+                    {row.coaDateCoverage ? ` · ${row.coaDateCoverage}` : ""}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          )}
+          {count > 5 && (
+            <p className="bell-more">and {count - 5} more in the queue</p>
+          )}
+          <button
+            type="button"
+            className="mini-button primary bell-open"
+            onClick={() => {
+              setOpen(false);
+              onOpen();
+            }}
+          >
+            <FileSignature size={12} /> Open the certificates queue
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminDashboard() {
   const [session, setSession] = useState(readAdminSession),
     [tab, setTab] = useState("overview"),
@@ -208,6 +391,11 @@ export function AdminDashboard() {
   // checked once on arrival, so a role changed since then shows the right
   // tabs — rather than a demoted administrator being offered Users and Audit
   // and meeting an error on every click. A fresh sign-in needs no check.
+  const certificates = usePendingCertificates(
+    session?.user?.email,
+    Boolean(session),
+  );
+
   const checkedToken = useRef("");
   useEffect(() => {
     const token = session?.token;
@@ -219,7 +407,11 @@ export function AdminDashboard() {
         if (stale || !current?.user) return;
         setSession((previous) => {
           if (!previous || previous.token !== token) return previous;
-          const next = { ...previous, user: current.user, expiresAt: current.expiresAt };
+          const next = {
+            ...previous,
+            user: current.user,
+            expiresAt: current.expiresAt,
+          };
           storeAdminSession(next);
           return next;
         });
@@ -319,7 +511,24 @@ export function AdminDashboard() {
             <h1>{heading}</h1>
             <p>{sub}</p>
           </div>
-          {usesPeriod && <PeriodPicker period={period} onChange={setPeriod} />}
+          {/* The bell comes last so it is the rightmost thing in the header at
+              every width. Its panel hangs from its right edge, and anywhere
+              else in the row that edge is far enough from the window's for a
+              320px panel to open off the left of the screen. */}
+          <div className="header-tools">
+            {usesPeriod && (
+              <PeriodPicker period={period} onChange={setPeriod} />
+            )}
+            <CertificateBell
+              pending={certificates.pending}
+              unseen={certificates.unseen}
+              onMarkSeen={certificates.markSeen}
+              onOpen={() => {
+                setTab("certificates");
+                setError("");
+              }}
+            />
+          </div>
         </header>
         {error && <div className="alert admin-alert">{error}</div>}
 
@@ -328,7 +537,12 @@ export function AdminDashboard() {
             <OverviewPanel period={period} onError={handleError} />
           )}
           {tab === "responses" && <ResponsesPanel onError={handleError} />}
-          {tab === "certificates" && <CertificatePanel onError={handleError} />}
+          {tab === "certificates" && (
+            <CertificatePanel
+              onError={handleError}
+              onQueueChanged={certificates.refresh}
+            />
+          )}
           {tab === "reports" && (
             <ReportsPanel period={period} onError={handleError} />
           )}

@@ -55,6 +55,14 @@ const newSubmissionId = () =>
     : `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
 /**
+ * The floor the backend applies to a transaction date, mirrored here. A
+ * mistyped year is the realistic way to land under it — 1995 for 2025 — and
+ * without this the form accepts it, takes the client through three more steps
+ * and refuses the whole submission at the end.
+ */
+const EARLIEST_TRANSACTION_DATE = "2000-01-01";
+
+/**
  * A fresh form carries a fresh submission id, sent with the response and held
  * steady across every retry of that response. A submission that reached the
  * sheet before the network gave up is then recognised rather than written
@@ -234,6 +242,12 @@ export function SurveyForm() {
     [services],
   );
 
+  const datesOrdered = !form.coaDateTo || form.coaDateTo >= form.coaDateFrom;
+  const transactionDateOk =
+    form.transactionDate &&
+    form.transactionDate <= portalToday() &&
+    form.transactionDate >= EARLIEST_TRANSACTION_DATE;
+
   const valid = useMemo(() => {
     if (step === 0)
       return (
@@ -242,7 +256,8 @@ export function SurveyForm() {
           form.coaName.trim() &&
           form.coaAgency.trim() &&
           form.coaPurpose.trim() &&
-          form.coaDateFrom)
+          form.coaDateFrom &&
+          datesOrdered)
       );
     // The same rules the backend applies. Looser ones here let "a@b@c.d", an
     // age of 25.5 or a future date through every step, only for Submit to be
@@ -251,8 +266,7 @@ export function SurveyForm() {
       return (
         /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
         form.clientType &&
-        form.transactionDate &&
-        form.transactionDate <= portalToday() &&
+        transactionDateOk &&
         form.region &&
         form.serviceId &&
         (!isOtherService || form.otherService.trim()) &&
@@ -270,6 +284,39 @@ export function SurveyForm() {
     // it, and it resolves only once the service list has loaded.
   }, [step, form, cc, sqd, wantsCoa, isOtherService, ratedService]);
 
+  /**
+   * Why the step cannot be left, when the reason is not a blank field.
+   *
+   * "Please complete every required answer" is no help to someone who has
+   * filled every one of them and put two dates the wrong way round. The
+   * wording matches what the backend would have said, so a client who reaches
+   * it either way reads the same sentence.
+   */
+  const problem = useMemo(() => {
+    if (step === 0 && wantsCoa && form.coaDateFrom && !datesOrdered)
+      return language === "tl"
+        ? "Hindi maaaring mas maaga ang huling araw ng inyong pagdalo kaysa sa simula nito."
+        : "The end date of your appearance cannot be earlier than its start.";
+    if (step === 1 && form.transactionDate) {
+      if (form.transactionDate > portalToday())
+        return language === "tl"
+          ? "Hindi maaaring nasa hinaharap ang petsa ng transaksyon."
+          : "The transaction date cannot be in the future.";
+      if (form.transactionDate < EARLIEST_TRANSACTION_DATE)
+        return language === "tl"
+          ? "Pakisuri ang taon ng petsa ng transaksyon."
+          : "Please check the year of the transaction date.";
+    }
+    return "";
+  }, [
+    step,
+    wantsCoa,
+    datesOrdered,
+    form.coaDateFrom,
+    form.transactionDate,
+    language,
+  ]);
+
   // Two clicks landing in the same tick share one render's closure, so both
   // would advance. Comparing against the step the click was made on makes the
   // second a no-op, instead of skipping a step and the validation with it.
@@ -283,9 +330,10 @@ export function SurveyForm() {
     setError("");
     if (!valid)
       return setError(
-        language === "tl"
-          ? "Pakikumpleto ang lahat ng kinakailangang sagot bago magpatuloy."
-          : "Please complete every required answer before continuing.",
+        problem ||
+          (language === "tl"
+            ? "Pakikumpleto ang lahat ng kinakailangang sagot bago magpatuloy."
+            : "Please complete every required answer before continuing."),
       );
     if (step < STEPS.length - 1) {
       advance(1);
@@ -730,6 +778,7 @@ export function SurveyForm() {
                     <b>*</b>
                     <input
                       type="date"
+                      min={EARLIEST_TRANSACTION_DATE}
                       max={portalToday()}
                       value={form.transactionDate}
                       onChange={(event) =>

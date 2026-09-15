@@ -113,7 +113,7 @@ const COA_COLUMNS = [
   "Actions",
 ];
 
-export function CertificatePanel({ onError }) {
+export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
   const [rows, setRows] = useState([]),
     [status, setStatus] = useState("REQUESTED"),
     [loading, setLoading] = useState(true),
@@ -160,6 +160,9 @@ export function CertificatePanel({ onError }) {
         `${result.duplicate ? "Already issued" : "Certificate issued"} for ${row.coaName}. ${result.emailStatus || ""}`.trim(),
       );
       await load();
+      // One fewer in the queue. Told now rather than at the next poll, so the
+      // bell does not go on claiming work that was just finished.
+      onQueueChanged();
     } catch (issueError) {
       // The key survives so the next click is recognised as the same attempt.
       setError(issueError.message);
@@ -199,6 +202,8 @@ export function CertificatePanel({ onError }) {
           : "Certificate details saved.",
       );
       await load();
+      // The queue is the same length, but the name the bell lists may not be.
+      onQueueChanged();
     } catch (saveError) {
       setRows(previous);
       setEditing(draft);

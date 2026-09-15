@@ -222,7 +222,9 @@ export function LandingPage() {
             </li>
             <li>
               <Languages size={15} />
-              {language === "tl" ? "Ingles at Filipino" : "English and Filipino"}
+              {language === "tl"
+                ? "Ingles at Filipino"
+                : "English and Filipino"}
             </li>
             <li>
               <Lock size={15} />

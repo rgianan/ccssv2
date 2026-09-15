@@ -359,7 +359,20 @@ export const sqdAnswers = (sqd, service) =>
     ]),
   );
 
-export const COURTESY_TITLES = ["Mr.", "Ms.", "Mrs.", "Dr.", "Engr.", "Atty."];
+/** Printed before the client's name on the Certificate of Appearance. The
+ *  backend keeps whatever is chosen to 12 characters, so any addition here
+ *  has to stay inside that. */
+export const COURTESY_TITLES = [
+  "Mr.",
+  "Ms.",
+  "Mrs.",
+  "Dr.",
+  "Engr.",
+  "Atty.",
+  "Prof.",
+  "Hon.",
+  "Dir.",
+];
 
 export const QUARTERS = [
   { value: "1", label: "1st Quarter (January – March)", months: [1, 2, 3] },

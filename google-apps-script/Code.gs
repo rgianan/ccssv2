@@ -510,16 +510,26 @@ function formatHeaderRow_(sh) {
 }
 
 /**
- * Sheets already checked in this execution. readSettings_ alone runs several
- * times in one request, and each pass re-read the header row to learn nothing
- * new — columns are only ever added, never removed, while a request runs.
+ * Sheets already checked in this execution, each with the header map last read
+ * from it. readSettings_ alone runs several times in one request, and each
+ * pass re-read the header row to learn nothing new — columns are only ever
+ * added, never removed, while a request runs.
+ *
+ * The header map is remembered, not just the sheet, so the shortcut is taken
+ * only when this call names nothing the sheet is already known to have. Keyed
+ * on the sheet name alone, two call sites describing the same sheet with
+ * different column lists would have the first silence the second: the columns
+ * never appended, and "nothing added" reported to the callers that act on that
+ * — ensureAuditSheet_ formats the timestamp column when it created the sheet,
+ * ensureServicesSheet_ fills has_fees when it added it.
  */
 var ENSURED_SHEETS_ = {};
 
 function ensureSetupSheet_(ss, sheetName, columns) {
-  if (ENSURED_SHEETS_[sheetName])
-    return { sheet: ENSURED_SHEETS_[sheetName], created: false, headersAdded: [] };
-  var sh = ss.getSheetByName(sheetName), created = false, added = [];
+  var memo = ENSURED_SHEETS_[sheetName];
+  if (memo && columns.every(function (column) { return idxOf_(memo.headers, column.aliases) >= 0; }))
+    return { sheet: memo.sheet, created: false, headersAdded: [] };
+  var sh = memo ? memo.sheet : ss.getSheetByName(sheetName), created = false, added = [];
   if (!sh) { sh = ss.insertSheet(sheetName); created = true; }
   var hdr = getHeaderMap_(sh);
   columns.forEach(function (column) {
@@ -535,7 +545,7 @@ function ensureSetupSheet_(ss, sheetName, columns) {
   // that has not changed cost a slow write each time, so it now happens only
   // when this call changed the header. setupCsmSheets restyles all of them.
   if (created || added.length) formatHeaderRow_(sh);
-  ENSURED_SHEETS_[sheetName] = sh;
+  ENSURED_SHEETS_[sheetName] = { sheet: sh, headers: hdr };
   return { sheet: sh, created: created, headersAdded: added };
 }
 

@@ -232,30 +232,24 @@
   transform: translateY(-3px);
   border-color: #b8cde4;
 }
-.program-grid i {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
-  background: var(--blue-soft);
-  color: var(--blue);
-  margin-bottom: 16px;
-}
-.program-grid i svg {
-  width: 21px;
-  height: 21px;
-}
+/* The soft blue block the icon used to sit in, now carrying the program code.
+   Keeping the block keeps the grid's rhythm — every card still opens with a
+   shape of the same weight in the same place — while what fills it is the
+   program's own name for itself rather than a picture chosen for it. Sized to
+   its text, so "E-CAV" and "BI INDORSEMENT" both sit properly. */
 .program-code {
   display: inline-block;
-  font: 800 9.5px Manrope, sans-serif;
-  letter-spacing: 0.11em;
+  font: 800 11.5px Manrope, sans-serif;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--gold);
-  background: var(--gold-soft);
-  border-radius: 999px;
-  padding: 4px 9px;
-  margin-bottom: 10px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-radius: 11px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  /* A long code wraps inside the card rather than widening the column. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .program-grid h3 {
   margin: 0;

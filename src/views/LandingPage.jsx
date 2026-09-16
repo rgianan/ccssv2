@@ -5,12 +5,9 @@ import {
   CalendarCheck,
   ClipboardCheck,
   FileSignature,
-  GraduationCap,
   Languages,
   Lock,
-  Plane,
   ShieldCheck,
-  Stethoscope,
   Timer,
 } from "lucide-react";
 import { Brand, LanguageToggle } from "./shared";
@@ -18,8 +15,6 @@ import { Tip } from "./ui";
 import { COPY, DEFAULT_SERVICES, SQD_SCALE, t } from "../lib/csm";
 import { getPortalConfig } from "../lib/api";
 import { navigate } from "../router";
-
-const PROGRAM_ICONS = [Stethoscope, GraduationCap, ClipboardCheck, Plane];
 
 /** lucide dropped its brand icons, so the Facebook mark is inlined. */
 function FacebookMark() {
@@ -281,27 +276,24 @@ export function LandingPage() {
               : "Each program is measured separately in the CSM Summary Report. Anything else is recorded under Other Services."}
           </p>
         </div>
+        {/* No icons here. There is no icon that means "SIAP Phase 2", so they
+            were assigned by position in the list — which made them arbitrary
+            on their own terms and reshuffled every card whenever a program was
+            added. The code carries the card instead: every program has one,
+            an administrator supplies it, and it is what the office and the
+            report call the program. */}
         <div className="program-grid">
-          {programs.map((program, index) => {
-            const Icon = PROGRAM_ICONS[index % PROGRAM_ICONS.length];
-            return (
-              <article key={program.service_id || program.code}>
-                <i>
-                  <Icon />
-                </i>
-                <span className="program-code">{program.code}</span>
-                <h3>
-                  {language === "tl" && program.name_tl
-                    ? program.name_tl
-                    : program.name_en}
-                </h3>
-              </article>
-            );
-          })}
+          {programs.map((program) => (
+            <article key={program.service_id || program.code}>
+              <span className="program-code">{program.code}</span>
+              <h3>
+                {language === "tl" && program.name_tl
+                  ? program.name_tl
+                  : program.name_en}
+              </h3>
+            </article>
+          ))}
           <article className="program-other">
-            <i>
-              <ClipboardCheck />
-            </i>
             <span className="program-code">OTHER</span>
             <h3>
               {language === "tl"

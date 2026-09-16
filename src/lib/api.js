@@ -319,6 +319,31 @@ export const generateCoa = async (responseId, issueKey, expectedStatus = "") => 
   return result;
 };
 
+/**
+ * Moves a response to another program. The overview's per-program figures and
+ * the certificate queue are both built from response rows, so both go with it.
+ */
+export const changeResponseService = async (payload) => {
+  const result = await adminCall("adminChangeResponseService", { payload });
+  invalidate("adminGetResponses", "adminGetOverview", "adminGetCoaRequests");
+  return result;
+};
+
+/**
+ * Refuses a request, and puts a refused one back. Both change what the
+ * certificate queue holds, so the overview's pending figure goes with them.
+ */
+export const declineCoa = async (payload) => {
+  const result = await adminCall("adminDeclineCoa", { payload });
+  invalidate("adminGetCoaRequests", "adminGetResponses", "adminGetOverview");
+  return result;
+};
+export const reopenCoa = async (referenceId) => {
+  const result = await adminCall("adminReopenCoa", { payload: { referenceId } });
+  invalidate("adminGetCoaRequests", "adminGetResponses", "adminGetOverview");
+  return result;
+};
+
 export const getAdminServices = () =>
   cachedCall(cacheKeys.services, READ_TTL_MS, () =>
     adminCall("adminGetServices"),

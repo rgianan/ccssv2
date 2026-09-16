@@ -673,6 +673,101 @@ td small {
   color: #505a6b;
 }
 
+/* The notify toggle in the decline dialog. A label that is otherwise a stacked
+   field has to sit beside its box here, and its help text under the words it
+   qualifies rather than under the box. */
+.modal-body label.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.checkbox-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--blue);
+}
+.checkbox-row small {
+  display: block;
+  margin-top: 3px;
+  font-weight: 500;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* --------------------------- Change program ------------------------------- */
+
+/* The one write on an otherwise read-only tab, so it is set apart from the
+   answers above it by a rule rather than sitting among them. */
+.reclassify-open {
+  margin-top: 14px;
+}
+.reclassify {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+}
+.reclassify label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  /* Wide enough for the longest programme name, and free to shrink on a
+     narrow window rather than pushing the row sideways. */
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.reclassify label small {
+  display: block;
+  margin-top: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.reclassify select,
+.reclassify input {
+  margin-top: 6px;
+  width: 100%;
+  font-size: 12.5px;
+}
+.reclassify-actions {
+  display: flex;
+  flex-direction: column;
+  /* Without this the column stretches the button to its full width, where a
+     row-level correction reads as a page-level action. */
+  align-items: flex-start;
+  gap: 7px;
+  /* Bottom-aligned with the controls beside it, which carry a label above. */
+  margin-top: 19px;
+  flex: 1 1 210px;
+  min-width: 0;
+}
+.reclassify-actions small {
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.reclassify-alert,
+.reclassify-notice {
+  flex-basis: 100%;
+  margin: 0;
+}
+.reclassify-notice {
+  margin: 0 0 14px;
+}
+
 .status-pill {
   display: inline-block;
   border-radius: 999px;

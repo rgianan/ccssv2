@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Ban,
   Check,
   ClipboardList,
   Download,
@@ -7,12 +8,14 @@ import {
   FileSignature,
   FileSpreadsheet,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   Upload,
   X,
 } from "lucide-react";
 import {
   cacheKeys,
+  declineCoa,
   generateCoa,
   generateReport,
   getAdminAuditLog,
@@ -25,6 +28,7 @@ import {
   saveAdminService,
   saveAdminSettings,
   saveAdminUser,
+  reopenCoa,
   saveCoaDetails,
   saveServiceStats,
   seedCache,
@@ -53,13 +57,23 @@ function Feedback({ error, notice }) {
 
 // ------------------------- Certificates of Appearance ------------------------
 
-const COA_STATUSES = ["REQUESTED", "ISSUED", "ERROR"];
+const COA_STATUSES = ["REQUESTED", "ISSUED", "DECLINED", "ERROR"];
 
 /** What each filter actually selects, since the button labels are terse. */
 const COA_FILTER_HELP = {
   REQUESTED: "Clients who asked for a certificate that has not been issued yet",
   ISSUED: "Certificates already generated and emailed to the client",
+  DECLINED:
+    "Requests the office refused, with the reason given. They can be put back in the queue",
   ERROR: "Attempts that failed. Check the details, then try issuing again",
+};
+
+/** The queue's words for each status, which are not the stored ones. */
+const COA_FILTER_LABEL = {
+  REQUESTED: "Awaiting release",
+  ISSUED: "Issued",
+  DECLINED: "Declined",
+  ERROR: "Failed",
 };
 
 /**
@@ -118,6 +132,7 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
     [status, setStatus] = useState("REQUESTED"),
     [loading, setLoading] = useState(true),
     [editing, setEditing] = useState(null),
+    [declining, setDeclining] = useState(null),
     [busyId, setBusyId] = useState(""),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
@@ -166,6 +181,58 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
     } catch (issueError) {
       // The key survives so the next click is recognised as the same attempt.
       setError(issueError.message);
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  /**
+   * Refuses a request, with the reason the client is given.
+   *
+   * The dialog closes only on success: a refused decline — an already-issued
+   * certificate, a lost session — has to leave the reason on screen, because
+   * it is the part nobody wants to type twice.
+   */
+  async function confirmDecline(event) {
+    event.preventDefault();
+    if (busyId) return;
+    const draft = declining;
+    setBusyId(draft.referenceId);
+    setError("");
+    setNotice("");
+    try {
+      const result = await declineCoa({
+        referenceId: draft.referenceId,
+        reason: draft.reason,
+        notify: draft.notify !== false,
+      });
+      setDeclining(null);
+      setNotice(
+        `Declined the request from ${draft.coaName}. ${result.emailStatus || ""}`.trim(),
+      );
+      await load();
+      onQueueChanged();
+    } catch (declineError) {
+      setError(declineError.message);
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  async function reopen(row) {
+    if (busyId) return;
+    setBusyId(row.referenceId);
+    setError("");
+    setNotice("");
+    try {
+      await reopenCoa(row.referenceId);
+      setNotice(
+        `${row.coaName}'s request is back in the queue, awaiting release.`,
+      );
+      await load();
+      onQueueChanged();
+    } catch (reopenError) {
+      setError(reopenError.message);
     } finally {
       setBusyId("");
     }
@@ -225,11 +292,7 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
               className={status === option ? "active" : ""}
               onClick={() => setStatus(option)}
             >
-              {option === "REQUESTED"
-                ? "Awaiting release"
-                : option === "ISSUED"
-                  ? "Issued"
-                  : "Failed"}
+              {COA_FILTER_LABEL[option] || option}
             </button>
           </Tip>
         ))}
@@ -290,7 +353,7 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
                     <td>{row.coaDateCoverage}</td>
                     <td>
                       <span
-                        className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus?.startsWith("ERROR") ? "failed" : "pending"}`}
+                        className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus?.startsWith("ERROR") ? "failed" : row.coaStatus === "DECLINED" ? "disabled" : "pending"}`}
                       >
                         {row.coaStatus}
                       </span>
@@ -303,6 +366,9 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
                           Being issued. If this stays for more than a few
                           minutes, the attempt was cut off — Generate again.
                         </small>
+                      )}
+                      {row.coaStatus === "DECLINED" && row.coaDeclineReason && (
+                        <small>{row.coaDeclineReason}</small>
                       )}
                       {row.detailsChanged && (
                         <small>
@@ -329,21 +395,52 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
                             <ExternalLink size={12} /> PDF
                           </a>
                         )}
-                        {/* Every row, not just the busy one: issue() ignores a
-                            second click while one is running, and a button
-                            that looks live but does nothing reads as broken. */}
-                        <button
-                          className="mini-button primary"
-                          disabled={Boolean(busyId)}
-                          onClick={() => issue(row)}
-                        >
-                          <FileSignature size={12} />
-                          {busyId === row.referenceId
-                            ? "Working…"
-                            : row.coaStatus === "ISSUED"
-                              ? "Reissue"
-                              : "Generate"}
-                        </button>
+                        {/* A declined request offers the way back instead of
+                            the way forward: issuing one the office has
+                            refused should take the decision being undone
+                            first, so the log reads in the order it happened. */}
+                        {row.coaStatus === "DECLINED" ? (
+                          <button
+                            className="mini-button"
+                            disabled={Boolean(busyId)}
+                            onClick={() => reopen(row)}
+                          >
+                            <RotateCcw size={12} />
+                            {busyId === row.referenceId
+                              ? "Working…"
+                              : "Put back in the queue"}
+                          </button>
+                        ) : (
+                          <>
+                            {/* Nothing to decline once it is in the client's
+                                hands — the backend refuses that too. */}
+                            {row.coaStatus !== "ISSUED" && (
+                              <button
+                                className="mini-button"
+                                disabled={Boolean(busyId)}
+                                onClick={() => setDeclining({ ...row })}
+                              >
+                                <Ban size={12} /> Decline
+                              </button>
+                            )}
+                            {/* Every row, not just the busy one: issue()
+                                ignores a second click while one is running,
+                                and a button that looks live but does nothing
+                                reads as broken. */}
+                            <button
+                              className="mini-button primary"
+                              disabled={Boolean(busyId)}
+                              onClick={() => issue(row)}
+                            >
+                              <FileSignature size={12} />
+                              {busyId === row.referenceId
+                                ? "Working…"
+                                : row.coaStatus === "ISSUED"
+                                  ? "Reissue"
+                                  : "Generate"}
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -361,6 +458,99 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
         </div>
       )}
 
+      {declining && (
+        <div className="modal-backdrop" onClick={() => setDeclining(null)}>
+          <form
+            className="modal"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={confirmDecline}
+          >
+            <header>
+              <h2>Decline this request</h2>
+              <button type="button" onClick={() => setDeclining(null)}>
+                <X />
+              </button>
+            </header>
+            <div className="modal-body">
+              {/* Inside the dialog, not only in the panel behind it. Both of
+                  these stay open — or reopen — when a save is refused, and the
+                  panel's copy of the message then sits under the backdrop
+                  where nobody can read it. */}
+              {error && <div className="alert full">{error}</div>}
+              {/* One span, deliberately: .notice is a flex row, so a
+                  sentence with a <b> in the middle of it becomes three
+                  columns side by side instead of a sentence. */}
+              <p className="notice full">
+                <span>
+                  {declining.coaTitle} {declining.coaName} asked for a
+                  certificate for{" "}
+                  <b>{declining.coaPurpose || "no stated purpose"}</b>
+                  {declining.coaAgency ? ` at ${declining.coaAgency}` : ""}. It
+                  leaves the queue and is not issued. You can put it back later.
+                </span>
+              </p>
+              <label className="full">
+                Reason
+                <textarea
+                  required
+                  autoFocus
+                  rows={3}
+                  maxLength={500}
+                  value={declining.reason || ""}
+                  onChange={(event) =>
+                    setDeclining((current) => ({
+                      ...current,
+                      reason: event.target.value,
+                    }))
+                  }
+                  placeholder="Why the office cannot issue this certificate"
+                />
+                <small>
+                  Recorded against the request, shown in the audit log, and sent
+                  to the client if you email them. Write it so it reads to the
+                  person who asked.
+                </small>
+              </label>
+              <label className="full checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={declining.notify !== false}
+                  onChange={(event) =>
+                    setDeclining((current) => ({
+                      ...current,
+                      notify: event.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  Email {declining.email || "the client"} the reason
+                  <small>
+                    Leave this on unless the request was not a genuine one —
+                    otherwise nobody ever hears back.
+                  </small>
+                </span>
+              </label>
+            </div>
+            <footer>
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => setDeclining(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button primary"
+                disabled={Boolean(busyId) || !(declining.reason || "").trim()}
+              >
+                <Ban size={16} />
+                {busyId ? "Declining…" : "Decline request"}
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
+
       {editing && (
         <div className="modal-backdrop" onClick={() => setEditing(null)}>
           <form
@@ -375,6 +565,11 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
               </button>
             </header>
             <div className="modal-body">
+              {/* Inside the dialog, not only in the panel behind it. Both of
+                  these stay open — or reopen — when a save is refused, and the
+                  panel's copy of the message then sits under the backdrop
+                  where nobody can read it. */}
+              {error && <div className="alert full">{error}</div>}
               {editing.coaStatus === "ISSUED" && (
                 <p className="notice full">
                   This certificate has already been issued. Saving updates the
@@ -1590,6 +1785,10 @@ export function AuditPanel({ onError }) {
               onChange={(event) => updateFilter("action", event.target.value)}
             >
               <option value="">All actions</option>
+              {/* Mirrors AUDITED_ACTIONS_ in Code.gs. The backend does not
+                  publish the list, so an action added there has to be added
+                  here too, or its entries reach the log and are then not
+                  findable by the one control that filters it. */}
               {[
                 "LOGIN",
                 "LOGOUT",
@@ -1597,6 +1796,9 @@ export function AuditPanel({ onError }) {
                 "SETTINGS_SAVE",
                 "COA_GENERATE",
                 "COA_UPDATE",
+                "COA_DECLINE",
+                "COA_REOPEN",
+                "RESPONSE_RECLASSIFY",
                 "REPORT_GENERATE",
                 "SERVICE_STATS_SAVE",
                 "USER_SAVE",

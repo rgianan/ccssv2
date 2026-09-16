@@ -93,9 +93,12 @@ function doPost(e) {
     else if (action === 'adminValidateSession') data = adminValidateSession(body.adminToken);
     else if (action === 'adminGetOverview') data = adminGetOverview(body.period || {}, body.adminToken);
     else if (action === 'adminGetResponses') data = adminGetResponses(body.filters || {}, body.adminToken);
+    else if (action === 'adminChangeResponseService') data = adminChangeResponseService(body.payload || {}, body.adminToken);
     else if (action === 'adminGetCoaRequests') data = adminGetCoaRequests(body.filters || {}, body.adminToken);
     else if (action === 'adminSaveCoaDetails') data = adminSaveCoaDetails(body.payload || {}, body.adminToken);
     else if (action === 'adminGenerateCoa') data = adminGenerateCoa(body.responseId, body.issueKey, body.adminToken, body.expectedStatus);
+    else if (action === 'adminDeclineCoa') data = adminDeclineCoa(body.payload || {}, body.adminToken);
+    else if (action === 'adminReopenCoa') data = adminReopenCoa(body.payload || {}, body.adminToken);
     else if (action === 'adminGetServices') data = adminGetServices(body.adminToken);
     else if (action === 'adminSaveService') data = adminSaveService(body.payload || {}, body.adminToken);
     else if (action === 'adminGetServiceStats') data = adminGetServiceStats(body.period || {}, body.adminToken);
@@ -582,6 +585,7 @@ function responseColumns_() {
     setupColumn_('COAIssuedAt', ['coa issued at']),
     setupColumn_('COAIssueKey', ['coa issue key']),
     setupColumn_('COAIssuedDetails', ['coa issued details']),
+    setupColumn_('COADeclineReason', ['coa decline reason']),
     setupColumn_('VerificationCode', ['verification code']),
     setupColumn_('VerificationURL', ['verification url'])
   ]);
@@ -1413,6 +1417,7 @@ var RESPONSE_FIELDS_ = {
   coaIssuedAt: ['coaissuedat','coa issued at'],
   coaIssueKey: ['coaissuekey','coa issue key'],
   coaIssuedDetails: ['coaissueddetails','coa issued details'],
+  coaDeclineReason: ['coadeclinereason','coa decline reason'],
   verificationCode: ['verificationcode','verification code'],
   verificationUrl: ['verificationurl','verification url']
 };
@@ -1469,6 +1474,7 @@ function buildResponseRecord_(value, col, rowIndex) {
     coaIssuedAt: cellText_(value, col.coaIssuedAt),
     coaIssueKey: cellText_(value, col.coaIssueKey),
     coaIssuedDetails: cellText_(value, col.coaIssuedDetails),
+    coaDeclineReason: cellText_(value, col.coaDeclineReason),
     verificationCode: cellText_(value, col.verificationCode),
     verificationUrl: cellText_(value, col.verificationUrl)
   };
@@ -1714,6 +1720,94 @@ function adminGetResponses(filters, adminToken) {
 }
 
 /** The response shape the admin table consumes. */
+/**
+ * What a reclassification moved, captured by this code before it writes, for
+ * the audit entry doPost appends afterwards.
+ *
+ * auditTargetForRequest_ sees only the request body, and by the time it runs
+ * the row already holds the new programme — so the programme moved *from*
+ * cannot be read back there. Taking it from the caller instead would put an
+ * unverified value in the log. Execution-scoped, like ENSURED_SHEETS_.
+ */
+var RECLASSIFY_AUDIT_ = {};
+
+/**
+ * Moves a response to a different programme.
+ *
+ * Clients pick the wrong one — most often Other services, with the name of a
+ * programme that is already on the list typed into the box. Until now the only
+ * correction was editing the Responses sheet by hand, which had two traps. Four
+ * columns have to move together, because the report groups on ServiceID while
+ * the dashboard's by-programme table and this tab's filter read ServiceCode, so
+ * changing one and not the rest left the two disagreeing about the same
+ * quarter. And the Responses table shows the typed description in preference to
+ * the programme name, so a stale OtherService made a correct change look like
+ * it had not taken. Neither trap is reachable from here, and unlike a hand edit
+ * this records who made the change.
+ */
+function adminChangeResponseService(payload, adminToken) {
+  requireAdmin_(adminToken);
+  payload = payload || {};
+  var referenceId = safeTrim_(payload.referenceId);
+  var serviceId = safeTrim_(payload.serviceId);
+  if (!referenceId) throw new Error('A response reference is required.');
+  if (!serviceId) throw new Error('Choose the program this response belongs to.');
+
+  // Any programme on the list, not only the active ones. A response recorded
+  // last quarter may belong to one the office has since withdrawn, and
+  // refusing that would leave the only correct answer unavailable.
+  var service = readServices_().filter(function (entry) {
+    return entry.service_id === serviceId;
+  })[0];
+  if (!service)
+    throw new Error('That program is no longer on the list. Refresh the page and choose again.');
+
+  // Required under Other services for the reason the survey requires it: the
+  // report's pooled Other Services row is the only place the transaction is
+  // ever named. Cleared for a main programme, which names itself.
+  var otherService = service.category === 'other'
+    ? safeTrim_(payload.otherService).slice(0, 200)
+    : '';
+  if (service.category === 'other' && !otherService)
+    throw new Error('Describe the transaction, since this response is being filed under Other services.');
+
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(10000)) throw new Error('The response sheet is busy. Please try again.');
+  try {
+    var found = findResponseRow_(referenceId), record = found.record;
+    var unchanged = record.serviceId === service.service_id &&
+      safeTrim_(record.otherService) === otherService;
+    RECLASSIFY_AUDIT_[referenceId] = {
+      from: safeTrim_(record.serviceCode) || '(none)',
+      to: service.code,
+      unchanged: unchanged
+    };
+    var answer = {
+      status: 'OK',
+      referenceId: record.referenceId,
+      serviceId: service.service_id,
+      serviceCode: service.code,
+      serviceName: service.name_en,
+      otherService: otherService,
+      unchanged: unchanged
+    };
+    if (unchanged) return answer;
+
+    // All four in one write. SQD5 is deliberately untouched: the fee question
+    // is re-derived from the new programme's has_fees on every read (see
+    // applyAnswerPolicy_), so the score follows the move by itself.
+    writeResponseCells_(found.sheet, found.header, record.rowIndex, {
+      serviceid: service.service_id,
+      servicecode: service.code,
+      servicename: service.name_en,
+      otherservice: otherService
+    });
+    return answer;
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
 function publicResponse_(record) {
   var out = {
     referenceId: record.referenceId, transactionDate: record.transactionDate,
@@ -2423,6 +2517,12 @@ var AUDITED_ACTIONS_ = {
   adminLogin: 'LOGIN', adminLogout: 'LOGOUT', adminSaveService: 'SERVICE_SAVE',
   adminSaveSettings: 'SETTINGS_SAVE', adminGenerateCoa: 'COA_GENERATE',
   adminSaveCoaDetails: 'COA_UPDATE', adminGenerateReport: 'REPORT_GENERATE',
+  // Refusing a certificate is a decision about a client's request, so it is
+  // recorded as deliberately as issuing one — and so is taking it back.
+  adminDeclineCoa: 'COA_DECLINE', adminReopenCoa: 'COA_REOPEN',
+  // A response counted under a different programme changes the filed report,
+  // and a hand edit to the sheet leaves no trace of who did it. This does.
+  adminChangeResponseService: 'RESPONSE_RECLASSIFY',
   adminSaveServiceStats: 'SERVICE_STATS_SAVE', adminSaveUser: 'USER_SAVE',
   adminUploadCoaTemplate: 'TEMPLATE_UPLOAD', adminUploadSignature: 'SIGNATURE_UPLOAD',
   // Not reachable through doPost — resetCsmData() records itself under this
@@ -2454,6 +2554,28 @@ function auditTargetForRequest_(action, body) {
     return { type: 'settings', id: 'Settings', details: { keys: Object.keys(body.settings || {}).join(',').slice(0, 200) } };
   if (action === 'adminGenerateCoa' || action === 'adminSaveCoaDetails')
     return { type: 'certificate', id: safeTrim_(body.responseId || payload.referenceId) };
+  if (action === 'adminDeclineCoa')
+    return {
+      type: 'certificate',
+      id: safeTrim_(payload.referenceId),
+      // The reason is the decision; whether the client was told is how the
+      // office answers "did anyone ever get back to them".
+      details: { reason: safeTrim_(payload.reason).slice(0, 200), notified: payload.notify !== false }
+    };
+  if (action === 'adminReopenCoa')
+    return { type: 'certificate', id: safeTrim_(payload.referenceId) };
+  if (action === 'adminChangeResponseService') {
+    // Both programme codes come from RECLASSIFY_AUDIT_, which this code filled
+    // in from the row itself; the request body carries only the id asked for.
+    var moved = RECLASSIFY_AUDIT_[safeTrim_(payload.referenceId)] || {};
+    return {
+      type: 'response',
+      id: safeTrim_(payload.referenceId),
+      details: moved.unchanged
+        ? { from: moved.from || '', to: moved.to || '', changed: false }
+        : { from: moved.from || '', to: moved.to || '' }
+    };
+  }
   if (action === 'adminGenerateReport')
     return { type: 'report', id: normalizePeriod_(body.period).key };
   if (action === 'adminSaveServiceStats')

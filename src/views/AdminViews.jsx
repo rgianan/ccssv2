@@ -18,8 +18,10 @@ import {
 import {
   adminLogin,
   adminLogout,
+  changeResponseService,
   getAdminOverview,
   getAdminResponses,
+  getAdminServices,
   getCoaRequests,
   readAdminSession,
   storeAdminSession,
@@ -839,8 +841,12 @@ const PAGE_SIZE = 100;
  * What the certificate column's four words mean, said once on the header
  * rather than on every row.
  */
+/** Every value this column can hold. A status missing from here is one the
+ *  reader meets with nothing to explain it. */
 const COA_COLUMN_HELP =
-  "REQUESTED — asked for, not yet issued. ISSUED — generated and emailed. " +
+  "REQUESTED — asked for, not yet issued. PROCESSING — being issued now; if it " +
+  "stays, the attempt was cut off. ISSUED — generated and emailed. " +
+  "DECLINED — the office refused it, with a reason on the Certificates tab. " +
   "ERROR — the last attempt failed; retry from the Certificates tab. " +
   "NONE — this client did not ask for one.";
 
@@ -856,12 +862,130 @@ const RESPONSE_COLUMNS = [
   "",
 ];
 
+/**
+ * Reclassifying one response, inside its own expanded row.
+ *
+ * It lives here rather than in the table because it is the one write on a tab
+ * that is otherwise a record: the dense rows stay read-only at a glance, and
+ * correcting a program is a deliberate step past "Details".
+ */
+function ChangeProgram({ row, onDone, onError }) {
+  const [services, setServices] = useState(null),
+    [serviceId, setServiceId] = useState(""),
+    [otherService, setOtherService] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+
+  useEffect(() => {
+    let stale = false;
+    getAdminServices()
+      .then((list) => {
+        if (stale) return;
+        setServices(list);
+        // Starts on the program the response already carries, so the select
+        // reads as "this is where it sits" rather than proposing a move.
+        const current = list.find((entry) => entry.code === row.serviceCode);
+        setServiceId(current?.service_id || "");
+        setOtherService(row.otherService || "");
+      })
+      .catch((thrown) => {
+        if (!stale) setError(thrown.message);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [row.referenceId]);
+
+  const chosen = services?.find((entry) => entry.service_id === serviceId);
+  const needsDescription = chosen?.category === "other";
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const result = await changeResponseService({
+        referenceId: row.referenceId,
+        serviceId,
+        otherService,
+      });
+      onDone(
+        result.unchanged
+          ? `${row.referenceId} was already filed under ${result.serviceCode}.`
+          : `${row.referenceId} moved to ${result.serviceCode}.`,
+      );
+    } catch (thrown) {
+      setError(thrown.message);
+      setBusy(false);
+    }
+  }
+
+  if (error && !services)
+    return <div className="alert reclassify-alert">{error}</div>;
+  if (!services) return <Skeleton width={260} height={38} radius={10} />;
+
+  return (
+    <form className="reclassify" onSubmit={submit}>
+      <label>
+        Program
+        <div className="select-wrap">
+          <select
+            value={serviceId}
+            onChange={(event) => setServiceId(event.target.value)}
+            disabled={busy}
+          >
+            <option value="">Choose a program…</option>
+            {services.map((entry) => (
+              <option key={entry.service_id} value={entry.service_id}>
+                {entry.code} — {entry.name_en}
+                {/* A response from an earlier quarter can belong to a program
+                    since withdrawn, so those stay selectable and are marked
+                    rather than hidden. */}
+                {entry.active === false ? " (withdrawn)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      </label>
+      {needsDescription && (
+        <label>
+          Transaction
+          <input
+            value={otherService}
+            onChange={(event) => setOtherService(event.target.value)}
+            placeholder="What the client came for"
+            maxLength={200}
+            disabled={busy}
+          />
+          <small>
+            Named in the report's pooled Other Services row, which is the only
+            place it appears.
+          </small>
+        </label>
+      )}
+      <div className="reclassify-actions">
+        <button className="mini-button primary" disabled={busy || !serviceId}>
+          {busy ? "Saving…" : "Save program"}
+        </button>
+        <small>
+          The score follows the response; SQD5 is re-read under the new
+          program's fee setting. Recorded in the audit log.
+        </small>
+      </div>
+      {error && <div className="alert reclassify-alert">{error}</div>}
+    </form>
+  );
+}
+
 function ResponsesPanel({ onError }) {
   const [data, setData] = useState({ rows: [], total: 0, offset: 0 }),
     [query, setQuery] = useState(""),
     [draftQuery, setDraftQuery] = useState(""),
     [offset, setOffset] = useState(0),
     [loading, setLoading] = useState(true),
+    [notice, setNotice] = useState(""),
+    [reclassifying, setReclassifying] = useState(""),
+    [reload, setReload] = useState(0),
     [expanded, setExpanded] = useState("");
 
   // The sheet is the source of truth for both filtering and paging, so the
@@ -886,7 +1010,7 @@ function ResponsesPanel({ onError }) {
     return () => {
       stale = true;
     };
-  }, [query, offset]);
+  }, [query, offset, reload]);
 
   const rows = data.rows || [];
   const total = data.total || 0;
@@ -896,8 +1020,18 @@ function ResponsesPanel({ onError }) {
   const search = (event) => {
     event.preventDefault();
     setExpanded("");
+    setReclassifying("");
+    setNotice("");
     setOffset(0);
     setQuery(draftQuery.trim());
+  };
+
+  // Collapsing a row puts away the form inside it, so reopening it later does
+  // not resume a half-made change against a row that may since have moved.
+  const toggleDetails = (referenceId) => {
+    setNotice("");
+    setReclassifying("");
+    setExpanded(expanded === referenceId ? "" : referenceId);
   };
 
   if (loading && !rows.length)
@@ -974,6 +1108,11 @@ function ResponsesPanel({ onError }) {
           )}
         </form>
       </div>
+      {notice && (
+        <div className="notice reclassify-notice" role="status">
+          {notice}
+        </div>
+      )}
       <div className={`table-scroll${loading ? " is-refreshing" : ""}`}>
         <table>
           <thead>
@@ -1033,11 +1172,7 @@ function ResponsesPanel({ onError }) {
                     <button
                       className="mini-button"
                       aria-expanded={expanded === row.referenceId}
-                      onClick={() =>
-                        setExpanded(
-                          expanded === row.referenceId ? "" : row.referenceId,
-                        )
-                      }
+                      onClick={() => toggleDetails(row.referenceId)}
                     >
                       {expanded === row.referenceId ? "Hide" : "Details"}
                     </button>
@@ -1064,6 +1199,28 @@ function ResponsesPanel({ onError }) {
                         <p className="answer-suggestion">
                           <b>Suggestion:</b> {row.suggestions}
                         </p>
+                      )}
+                      {reclassifying === row.referenceId ? (
+                        <ChangeProgram
+                          row={row}
+                          onError={onError}
+                          onDone={(message) => {
+                            setReclassifying("");
+                            setNotice(message);
+                            // The row on screen is from before the move.
+                            setReload((value) => value + 1);
+                          }}
+                        />
+                      ) : (
+                        <button
+                          className="mini-button reclassify-open"
+                          onClick={() => {
+                            setNotice("");
+                            setReclassifying(row.referenceId);
+                          }}
+                        >
+                          <ListChecks size={12} /> Change program
+                        </button>
                       )}
                     </td>
                   </tr>

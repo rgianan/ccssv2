@@ -56,6 +56,7 @@ function listCoaRequests_(wanted) {
         coaError: record.coaStatus.indexOf('ERROR') === 0 ? record.coaStatus : '',
         coaLink: record.coaLink,
         coaIssuedAt: record.coaIssuedAt,
+        coaDeclineReason: record.coaDeclineReason,
         verificationCode: record.verificationCode,
         // Edited after release: the certificate in the client's hands, and
         // what /verification says, still carry the details it was issued with.
@@ -133,6 +134,106 @@ function adminSaveCoaDetails(payload, adminToken) {
     reissueNeeded: record.coaStatus === 'ISSUED' &&
       !sameCoaDetails_(issuedCoaDetails_(record), edited)
   };
+}
+
+/**
+ * Refuses a request for a certificate.
+ *
+ * Until now a request the office would not fulfil had nowhere to go: it sat in
+ * the queue as REQUESTED for good, indistinguishable from work not yet done,
+ * and the client was never told. DECLINED is its own status rather than an
+ * ERROR, because a decision is not a failure — nothing was attempted and
+ * nothing went wrong.
+ *
+ * The script lock, not the document lock: the race worth preventing is with
+ * issueCoa_, which holds this one for the length of an issuance. Declining a
+ * row while its certificate is being minted would otherwise write DECLINED
+ * over a row that is about to become ISSUED.
+ */
+function adminDeclineCoa(payload, adminToken) {
+  requireAdmin_(adminToken);
+  payload = payload || {};
+  var referenceId = safeTrim_(payload.referenceId);
+  var reason = safeTrim_(payload.reason).slice(0, 500);
+  var notify = payload.notify !== false;
+  if (!referenceId) throw new Error('A response reference is required.');
+  // Required, not optional. It is what the client is told, and what the office
+  // has to show when asked months later why this one was refused.
+  if (!reason)
+    throw new Error('Give a reason for declining. It is recorded, and it is what the client is told.');
+
+  // The reason has a column of its own, which a sheet set up before this
+  // version will not have yet.
+  ensureResponseColumns_();
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000))
+    throw new Error('A certificate is being issued right now. Wait a moment, then try again.');
+  try {
+    var found = findResponseRow_(referenceId), record = found.record;
+    if (!record.coaRequested)
+      throw new Error('This response did not ask for a Certificate of Appearance.');
+    if (record.coaStatus === 'ISSUED')
+      throw new Error('This certificate has already been issued and the client holds it. ' +
+        'It cannot be declined after the fact.');
+    if (record.coaStatus === 'DECLINED')
+      return { status: 'OK', referenceId: record.referenceId, unchanged: true,
+               emailStatus: 'It was already declined, so nothing was sent again.' };
+
+    writeResponseCells_(found.sheet, found.header, record.rowIndex, {
+      coastatus: 'DECLINED',
+      coadeclinereason: reason
+    });
+    SpreadsheetApp.flush();
+
+    // Recorded first, sent second. A mail failure must not leave the register
+    // saying the request is still open when the office has decided it is not.
+    var emailStatus = '';
+    if (notify) {
+      try {
+        emailStatus = sendCoaDeclineEmail_(record, reason, readSettings_());
+      } catch (mailError) {
+        emailStatus = 'Declined, but the client could not be emailed (' +
+          String(mailError && mailError.message || mailError).slice(0, 160) + '). Tell them another way.';
+      }
+    } else {
+      emailStatus = 'The client was not emailed.';
+    }
+    return { status: 'OK', referenceId: record.referenceId, emailStatus: emailStatus };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+/**
+ * Puts a declined request back in the queue, for a decision made in error.
+ *
+ * The reason is cleared with it: the row is open work again, and a reason left
+ * behind would show against a request nobody has refused. The audit log keeps
+ * the history — both the decline and this.
+ */
+function adminReopenCoa(payload, adminToken) {
+  requireAdmin_(adminToken);
+  payload = payload || {};
+  var referenceId = safeTrim_(payload.referenceId);
+  if (!referenceId) throw new Error('A response reference is required.');
+  ensureResponseColumns_();
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000))
+    throw new Error('A certificate is being issued right now. Wait a moment, then try again.');
+  try {
+    var found = findResponseRow_(referenceId), record = found.record;
+    if (record.coaStatus !== 'DECLINED')
+      throw new Error('Only a declined request can be put back in the queue.');
+    writeResponseCells_(found.sheet, found.header, record.rowIndex, {
+      coastatus: 'REQUESTED',
+      coadeclinereason: ''
+    });
+    return { status: 'OK', referenceId: record.referenceId };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
 }
 
 // ------------------------------- Formatting -----------------------------------
@@ -338,6 +439,17 @@ function issueCoa_(responseId, issueKey, outputFolder, expectedStatus) {
         ' by another request, so nothing was sent again.',
       duplicate: true
     };
+
+  // The office refused this request. The queue hides Generate on a declined
+  // row, but a second administrator's tab still listing it as awaiting does
+  // not know that, and neither does a browser that has not refreshed — and
+  // without this the click goes through and mails the client the certificate
+  // that was just declined. Thrown rather than answered as a duplicate: it is
+  // a decision being contradicted, and doPost records the attempt as a failure.
+  if (record.coaStatus === 'DECLINED')
+    throw new Error('This request was declined' +
+      (record.coaDeclineReason ? ' — ' + record.coaDeclineReason : '') +
+      '. Put it back in the queue first if it should be issued after all.');
 
   if (!record.coaRequested) throw new Error('This response did not request a Certificate of Appearance.');
   if (!record.coaName || !record.coaAgency || !record.coaPurpose || !record.coaDateFrom)
@@ -658,6 +770,99 @@ function coaEmailHtml_(view) {
    '</td></tr>' +
 
    // Footer
+   '<tr><td bgcolor="' + WASH + '" style="background:' + WASH + ';border-top:1px solid ' + LINE + ';padding:18px 30px;' +
+     'font:400 11.5px/1.6 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:' + MUTED + ';">' +
+     esc(view.office) + '<br>Commission on Higher Education' +
+   '</td></tr>' +
+
+  '</table>' +
+ '</td></tr>' +
+'</table></body></html>';
+}
+
+/**
+ * Tells the client their request was not granted, and why.
+ *
+ * Its own builder rather than a branch inside coaEmailHtml_: this is a
+ * different document — no attachment, no call to action, no verification panel
+ * — and the issuance email is the one thing in this file that reaches every
+ * client who gets a certificate. Sharing the palette and the shell keeps them
+ * recognisably from the same office without putting the working one at risk.
+ */
+function sendCoaDeclineEmail_(record, reason, settings) {
+  if (!record.email) return 'Declined. No recipient email on file, so nobody was told.';
+  if (MailApp.getRemainingDailyQuota() < 1)
+    return 'Declined, but the daily email quota is exhausted. Tell the client another way.';
+  var office = settings.office_name || 'Office of Student Development and Services (OSDS)';
+  var salutation = safeTrim_(record.coaTitle + ' ' + record.coaName) || 'Sir/Madam';
+
+  // Built line by line: every mail client that refuses HTML still gets the
+  // reason, which is the only part of this message that matters.
+  var plain = [
+    'Dear ' + salutation + ',',
+    '',
+    'We have reviewed your request for a Certificate of Appearance from the ' + office +
+      ', and we are unable to issue it.',
+    '',
+    'Reason: ' + reason,
+    '',
+    'If you believe this is a mistake, or you can provide what is missing, please reply to ' +
+      'this email or contact the office and we will look at it again.',
+    '',
+    office,
+    'Commission on Higher Education'
+  ].join('\n');
+
+  MailApp.sendEmail({
+    to: record.email,
+    subject: 'About your Certificate of Appearance request',
+    body: plain,
+    htmlBody: coaDeclineEmailHtml_({ office: office, salutation: salutation, reason: reason }),
+    name: office
+  });
+  return 'The client was emailed the reason.';
+}
+
+function coaDeclineEmailHtml_(view) {
+  var DEEP = '#001b5e', INK = '#16223c', MUTED = '#66748a', LINE = '#dae2ec', WASH = '#f5f8fc';
+  var esc = escapeHtml_;
+  return '' +
+'<!doctype html><html><body style="margin:0;padding:0;background:' + WASH + ';">' +
+'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="' + WASH + '" style="background:' + WASH + ';padding:28px 12px;">' +
+ '<tr><td align="center">' +
+  '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid ' + LINE + ';border-radius:14px;overflow:hidden;">' +
+
+   '<tr><td bgcolor="' + DEEP + '" style="background:' + DEEP + ';padding:22px 30px;">' +
+     '<img src="' + COA_EMAIL_LOGO_ + '" width="40" height="40" alt="" ' +
+       'style="vertical-align:middle;border:0;display:inline-block;">' +
+     '<span style="display:inline-block;padding-left:12px;vertical-align:middle;' +
+       'font:700 15px/1.2 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:#ffffff;">' +
+       'CHED &middot; OSDS</span>' +
+   '</td></tr>' +
+
+   '<tr><td style="padding:30px;font:400 14.5px/1.7 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:#4d5563;">' +
+    '<div style="font:700 11px/1 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;letter-spacing:0.14em;text-transform:uppercase;color:#5074a9;padding-bottom:10px;">' +
+      'Certificate of Appearance</div>' +
+    '<h1 style="margin:0 0 18px;font:700 24px/1.25 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:' + INK + ';">' +
+      'We cannot issue this certificate</h1>' +
+    '<p style="margin:0 0 14px;">Dear ' + esc(view.salutation) + ',</p>' +
+    '<p style="margin:0;">We have reviewed your request for a Certificate of Appearance from the ' +
+      esc(view.office) + ', and we are unable to issue it.</p>' +
+
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="margin:24px 0 0;background:' + WASH + ';border:1px solid ' + LINE + ';border-radius:10px;">' +
+     '<tr><td style="padding:16px 18px;">' +
+      '<div style="font:700 10px/1 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;letter-spacing:0.12em;text-transform:uppercase;color:' + MUTED + ';padding-bottom:8px;">' +
+        'Reason</div>' +
+      '<div style="font-size:14px;line-height:1.6;color:' + INK + ';">' + esc(view.reason) + '</div>' +
+     '</td></tr>' +
+    '</table>' +
+
+    '<p style="margin:24px 0 0;font-size:12.5px;color:' + MUTED + ';">' +
+      'If you believe this is a mistake, or you can provide what is missing, reply to this email ' +
+      'or contact the office and we will look at it again.</p>' +
+   '</td></tr>' +
+
    '<tr><td bgcolor="' + WASH + '" style="background:' + WASH + ';border-top:1px solid ' + LINE + ';padding:18px 30px;' +
      'font:400 11.5px/1.6 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,Roboto,Helvetica,Arial,sans-serif;color:' + MUTED + ';">' +
      esc(view.office) + '<br>Commission on Higher Education' +

@@ -32,6 +32,12 @@ import {
 } from "../lib/api";
 import { Bilingual, Brand, LanguageToggle, TurnstileWidget } from "./shared";
 import { Skeleton, SkeletonRegion, Tip } from "./ui";
+import {
+  PRIVACY_NOTE,
+  PRIVACY_NOTICE_VERSION,
+  PURPOSE_PRIVACY_HELP,
+  PrivacyNoticeDialog,
+} from "./PrivacyNotice";
 import { navigate } from "../router";
 
 /**
@@ -184,6 +190,9 @@ export function SurveyForm() {
     [done, setDone] = useState(null),
     [error, setError] = useState(""),
     [turnstileToken, setTurnstileToken] = useState(""),
+    // How many times the Privacy Notice has been asked for. A count, not an
+    // open flag: see PrivacyNoticeDialog for why a flag could get stuck.
+    [privacyOpens, setPrivacyOpens] = useState(0),
     [turnstileReset, setTurnstileReset] = useState(0);
 
   // `fresh` skips the cached copy. The recovery path below runs because the
@@ -243,6 +252,10 @@ export function SurveyForm() {
   );
 
   const datesOrdered = !form.coaDateTo || form.coaDateTo >= form.coaDateFrom;
+  // The day of the appearance has to have come. "Until" is left open: a
+  // certificate can honestly cover the rest of a process already under way.
+  const appearanceNotFuture =
+    !form.coaDateFrom || form.coaDateFrom <= portalToday();
   const transactionDateOk =
     form.transactionDate &&
     form.transactionDate <= portalToday() &&
@@ -257,6 +270,7 @@ export function SurveyForm() {
           form.coaAgency.trim() &&
           form.coaPurpose.trim() &&
           form.coaDateFrom &&
+          appearanceNotFuture &&
           datesOrdered)
       );
     // The same rules the backend applies. Looser ones here let "a@b@c.d", an
@@ -293,6 +307,10 @@ export function SurveyForm() {
    * it either way reads the same sentence.
    */
   const problem = useMemo(() => {
+    if (step === 0 && wantsCoa && !appearanceNotFuture)
+      return language === "tl"
+        ? "Hindi maaaring nasa hinaharap ang petsa ng pagpunta."
+        : "The date of appearance cannot be in the future.";
     if (step === 0 && wantsCoa && form.coaDateFrom && !datesOrdered)
       return language === "tl"
         ? "Hindi maaaring mas maaga ang huling araw ng inyong pagdalo kaysa sa simula nito."
@@ -311,6 +329,7 @@ export function SurveyForm() {
   }, [
     step,
     wantsCoa,
+    appearanceNotFuture,
     datesOrdered,
     form.coaDateFrom,
     form.transactionDate,
@@ -356,6 +375,9 @@ export function SurveyForm() {
       const { submissionId, ...answers } = {
         ...form,
         language,
+        // The version of the notice on screen when Submit was pressed. The
+        // backend stamps the time; this says which words were shown.
+        privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
         serviceCode: selectedService?.code || "",
         serviceName: selectedService?.name_en || "",
         ...ccAnswers(cc),
@@ -694,6 +716,7 @@ export function SurveyForm() {
                           ? 'Isulat ito bilang pandugtong ng pangungusap: "…para sa layunin ng ___."'
                           : 'Write it so it completes the sentence "…for the purpose of ___."'}
                       </small>
+                      <small>{PURPOSE_PRIVACY_HELP}</small>
                     </label>
                     <div className="field-grid">
                       <label>
@@ -703,6 +726,7 @@ export function SurveyForm() {
                         <b>*</b>
                         <input
                           type="date"
+                          max={portalToday()}
                           value={form.coaDateFrom}
                           onChange={(event) =>
                             update("coaDateFrom", event.target.value)
@@ -1048,6 +1072,26 @@ export function SurveyForm() {
             )}
 
             {error && <div className="alert">{error}</div>}
+
+            {/* Shown on the step that submits, as the last thing above the
+                button — read before sending, not agreed to. There is
+                deliberately no checkbox and the button stays "Submit": this
+                documents that the notice was presented, which is what the
+                backend records, rather than asking for consent. */}
+            {step === STEPS.length - 1 && (
+              <p className="submit-privacy-notice">
+                {PRIVACY_NOTE.before}
+                <button
+                  type="button"
+                  className="link-button"
+                  aria-haspopup="dialog"
+                  onClick={() => setPrivacyOpens((count) => count + 1)}
+                >
+                  {PRIVACY_NOTE.link}
+                </button>
+                {PRIVACY_NOTE.after}
+              </p>
+            )}
           </div>
 
           <footer className="form-footer">
@@ -1108,6 +1152,11 @@ export function SurveyForm() {
           </footer>
         </section>
       </main>
+      {/* Rendered once, beside the form rather than inside a step: a modal
+          <dialog> sits in the browser's top layer wherever it is in the tree,
+          and opening it only counts a click, so every answer and the security
+          check already completed stay exactly as they were. */}
+      <PrivacyNoticeDialog openCount={privacyOpens} />
     </div>
   );
 }

@@ -124,6 +124,41 @@ function pooledStat_(serviceList, stats) {
   return pooled;
 }
 
+/**
+ * The main programmes a report gives a row and a sheet of their own.
+ *
+ * Every active programme — one the office offers, even if nobody used it this
+ * period, because zero is a real result. A withdrawn programme only when the
+ * period shows it was still in use: responses filed under it, or client and
+ * transaction counts the office entered for it. Without that condition every
+ * programme ever withdrawn stayed in every report that followed, as an empty
+ * sheet and a row of zeros — which, in a report filed with ARTA, reads as a
+ * service the office offered and no one came for.
+ *
+ * Which responses count as Other Services is decided separately, against every
+ * main programme withdrawn or not, so this can never move a response out of
+ * the programme it was filed under. It cannot here in any case: a withdrawn
+ * programme with a response in the period is one this includes.
+ *
+ * What it cannot see is a programme withdrawn after a period that had no
+ * responses and no counts entered; regenerating that period's report omits it.
+ * The sheet keeps no record of when a programme was offered, so there is
+ * nothing to go on beyond the period's own evidence.
+ */
+function reportedMainServices_(services, records, stats) {
+  return services.filter(function (service) {
+    if (service.category !== 'main') return false;
+    // As readServices_ reads the sheet: anything short of an explicit false is
+    // active, so a blank cell never drops a programme from the report.
+    if (service.active !== false) return true;
+    var stat = (stats || {})[service.service_id];
+    var countsEntered = !!stat && (safeTrim_(stat.clients) !== '' || safeTrim_(stat.transactions) !== '');
+    return countsEntered || records.some(function (record) {
+      return record.serviceId === service.service_id;
+    });
+  });
+}
+
 // SQD block on the CSM Summary sheet: column C starts a mean/median pair per SQD.
 var SQD_FIRST_COLUMN_ = 3;
 var OVERALL_COLUMN_ = SQD_FIRST_COLUMN_ + SQD_DIMENSIONS_.length * 2;      // U
@@ -280,8 +315,7 @@ function buildReport_(period, actorEmail, folder) {
 
   try {
     buildSummarySheet_(temporary, period, settings, services, records, stats);
-    services
-      .filter(function (service) { return service.category === 'main'; })
+    reportedMainServices_(services, records, stats)
       .forEach(function (service) {
         var serviceRecords = records.filter(function (record) { return record.serviceId === service.service_id; });
         buildServiceSheet_(temporary, period, settings, service, serviceRecords);
@@ -476,8 +510,7 @@ function buildSummarySheet_(ss, period, settings, services, records, stats) {
   styleHeaderRow_(sheet, headerRow, 1, width);
   styleHeaderRow_(sheet, subRow, 1, width);
 
-  var reportRows = services
-    .filter(function (service) { return service.category === 'main'; })
+  var reportRows = reportedMainServices_(services, records, stats)
     .map(function (service) {
       return {
         code: service.code,

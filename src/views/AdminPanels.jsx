@@ -35,7 +35,7 @@ import {
   uploadCoaTemplate,
   uploadSignature,
 } from "../lib/api";
-import { COURTESY_TITLES, OTHER_SERVICE_CODE } from "../lib/csm";
+import { COURTESY_TITLES, OTHER_SERVICE_CODE, portalToday } from "../lib/csm";
 import { describePeriod } from "./PeriodPicker";
 import {
   Skeleton,
@@ -627,6 +627,7 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
                 <input
                   type="date"
                   required
+                  max={portalToday()}
                   value={editing.coaDateFrom || ""}
                   onChange={(event) =>
                     setEditing({ ...editing, coaDateFrom: event.target.value })

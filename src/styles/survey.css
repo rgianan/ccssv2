@@ -394,6 +394,168 @@
   gap: 12px;
 }
 
+/* ----------------------------- Privacy notice ----------------------------- */
+
+/* The line above Submit. Muted like the helper text elsewhere on the form, but
+   a size up: it is a notice meant to be read before sending, not a hint. Not
+   .privacy-note — that is the intro's confidentiality block, a flex row with a
+   rule above it, and sharing the name restyled each with the other's rules. */
+.submit-privacy-notice {
+  margin: 22px 0 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+/* "Privacy Notice" is a button, not a link: it opens a dialog and must never
+   navigate, since leaving the page would lose everything typed into the form.
+   Styled to read as the link it behaves like. */
+.link-button {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.link-button:hover {
+  text-decoration-thickness: 2px;
+}
+.link-button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.privacy-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 24px 60px rgba(16, 34, 60, 0.22);
+  overflow: hidden;
+}
+.privacy-dialog::backdrop {
+  background: rgba(10, 22, 48, 0.55);
+}
+/* Fills the dialog box, so a click reaching the <dialog> itself can only have
+   landed on the backdrop. The head and foot stay put; only the text scrolls. */
+.privacy-dialog-inner {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 34px);
+  max-height: calc(100dvh - 34px);
+}
+.privacy-dialog-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px 26px;
+  border-bottom: 1px solid var(--border);
+}
+.privacy-dialog-head h2 {
+  margin: 0;
+  font: 800 19px/1.2 Manrope, sans-serif;
+  color: var(--ink);
+}
+.privacy-dialog-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+.privacy-dialog-close:hover {
+  color: var(--ink);
+  border-color: #b8c6d8;
+}
+.privacy-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Reaching the end of the notice must not start scrolling the form behind. */
+  overscroll-behavior: contain;
+  padding: 18px 26px 22px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: #4d5563;
+}
+.privacy-dialog-body h3 {
+  margin: 22px 0 6px;
+  font: 700 14.5px/1.35 Manrope, sans-serif;
+  color: var(--ink);
+}
+.privacy-dialog-body p {
+  margin: 0 0 10px;
+}
+.privacy-dialog-body ul {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+.privacy-dialog-body li {
+  margin: 3px 0;
+}
+.privacy-dialog-body address {
+  font-style: normal;
+  padding: 12px 14px;
+  background: var(--cream);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.privacy-dialog-body a {
+  color: var(--blue);
+}
+.privacy-dialog-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 22px 14px 26px;
+  border-top: 1px solid var(--border);
+}
+.privacy-dialog-foot small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+@media (max-width: 620px) {
+  .privacy-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 14px;
+  }
+  .privacy-dialog-inner {
+    max-height: calc(100vh - 18px);
+    max-height: calc(100dvh - 18px);
+  }
+  .privacy-dialog-head,
+  .privacy-dialog-foot {
+    padding-left: 18px;
+    padding-right: 14px;
+  }
+  .privacy-dialog-body {
+    padding: 16px 18px 20px;
+    font-size: 13px;
+  }
+}
+
 /* -------------------------------- Success -------------------------------- */
 
 .success-page {

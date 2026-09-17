@@ -11,7 +11,7 @@ import {
   Timer,
 } from "lucide-react";
 import { Brand, LanguageToggle } from "./shared";
-import { Tip } from "./ui";
+import { Skeleton, Tip } from "./ui";
 import { COPY, DEFAULT_SERVICES, SQD_SCALE, t } from "../lib/csm";
 import { getPortalConfig } from "../lib/api";
 import { navigate } from "../router";
@@ -127,7 +127,13 @@ function Header({ language, setLanguage }) {
 
 export function LandingPage() {
   const [language, setLanguage] = useState("en");
-  const [services, setServices] = useState([]);
+  // null until the backend answers. Three states, kept apart: an empty list
+  // used to mean all of "still loading", "the office offers no main program"
+  // and "the backend is down", and all three showed the seeded programs — so
+  // every visitor saw a list that was not the office's, which then changed
+  // under them, and a program withdrawn from that seed stayed advertised.
+  const [services, setServices] = useState(null);
+  const [unreachable, setUnreachable] = useState(false);
   useEffect(() => {
     getPortalConfig()
       .then((config) =>
@@ -138,16 +144,17 @@ export function LandingPage() {
           ),
         ),
       )
-      .catch(() => setServices([]));
+      .catch(() => setUnreachable(true));
   }, []);
-  // Falls back to the four seeded programs so the marketing page still renders
-  // if the backend is unreachable.
-  const programs = services.length
-    ? services
-    : DEFAULT_SERVICES.map((service, index) => ({
+  // The seeded programs only when the backend could not be reached, so the
+  // page still says what the survey covers rather than showing nothing. A
+  // backend that answered is believed, even when its answer is an empty list.
+  const programs = unreachable
+    ? DEFAULT_SERVICES.map((service, index) => ({
         ...service,
         service_id: `seed-${index}`,
-      }));
+      }))
+    : services;
 
   return (
     <div className="landing">
@@ -282,17 +289,35 @@ export function LandingPage() {
             added. The code carries the card instead: every program has one,
             an administrator supplies it, and it is what the office and the
             report call the program. */}
-        <div className="program-grid">
-          {programs.map((program) => (
-            <article key={program.service_id || program.code}>
-              <span className="program-code">{program.code}</span>
-              <h3>
-                {language === "tl" && program.name_tl
-                  ? program.name_tl
-                  : program.name_en}
-              </h3>
-            </article>
-          ))}
+        <div className="program-grid" aria-busy={programs === null}>
+          {programs === null
+            ? // Placeholders the shape of a real card — a code block and two
+              // lines — so the grid does not jump when the programs arrive.
+              Array.from({ length: 4 }, (_, index) => (
+                <article key={`loading-${index}`} aria-hidden="true">
+                  <Skeleton
+                    width={76}
+                    height={32}
+                    radius={11}
+                    style={{ display: "block", marginBottom: 14 }}
+                  />
+                  <Skeleton
+                    width="88%"
+                    style={{ display: "block", marginBottom: 8 }}
+                  />
+                  <Skeleton width="56%" style={{ display: "block" }} />
+                </article>
+              ))
+            : programs.map((program) => (
+                <article key={program.service_id || program.code}>
+                  <span className="program-code">{program.code}</span>
+                  <h3>
+                    {language === "tl" && program.name_tl
+                      ? program.name_tl
+                      : program.name_en}
+                  </h3>
+                </article>
+              ))}
           <article className="program-other">
             <span className="program-code">OTHER</span>
             <h3>

@@ -234,6 +234,18 @@ function parseDate_(value) {
   return isNaN(parsed) ? null : parsed;
 }
 
+/**
+ * Whether a date falls after today in the office's calendar.
+ *
+ * A Certificate of Appearance attests that an appearance happened, so its
+ * start date may not be a day that has not arrived. Only the start: an "until"
+ * date ahead of today can be honest — a client on the first day of a three-day
+ * process asking for a certificate that covers all three.
+ */
+function isAfterToday_(date) {
+  return fmtDate_(date) > fmtDate_(new Date());
+}
+
 function longDate_(value) {
   var date = parseDate_(value);
   if (!date) return safeTrim_(value);
@@ -587,7 +599,9 @@ function responseColumns_() {
     setupColumn_('COAIssuedDetails', ['coa issued details']),
     setupColumn_('COADeclineReason', ['coa decline reason']),
     setupColumn_('VerificationCode', ['verification code']),
-    setupColumn_('VerificationURL', ['verification url'])
+    setupColumn_('VerificationURL', ['verification url']),
+    setupColumn_('privacy_notice_version', ['privacynoticeversion', 'privacy notice version']),
+    setupColumn_('privacy_notice_presented_at', ['privacynoticepresentedat', 'privacy notice presented at'])
   ]);
 }
 
@@ -1318,12 +1332,23 @@ function submitResponse(formData) {
   // certificate would then print "from August 9 to August 8".
   if (wantsCoa && coaTo && coaTo < coaFrom)
     return { status: 'BAD_REQUEST', message: 'The end date of your appearance cannot be earlier than its start.' };
+  if (wantsCoa && isAfterToday_(coaFrom))
+    return { status: 'BAD_REQUEST', message: 'The date of appearance cannot be in the future.' };
 
   var lock = LockService.getDocumentLock();
   lock.waitLock(20000);
   try {
-    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES);
-    if (!sh) throw new Error("Sheet 'Responses' not found. Run setupCsmSheets().");
+    // A missing Responses sheet is still a setup that never ran, and says so.
+    if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES))
+      throw new Error("Sheet 'Responses' not found. Run setupCsmSheets().");
+    // Columns are ensured here, not left to setupCsmSheets alone. put() below
+    // skips a column the sheet does not have without a word, so a sheet that
+    // missed a setup run would take every submission and quietly record no
+    // Privacy Notice version for any of them — the one field whose absence
+    // cannot be reconstructed afterwards. Inside the document lock, so two
+    // submissions cannot both add the same header; after the first, this is a
+    // single header read.
+    var sh = ensureResponseColumns_();
     var hdr = getHeaderMap_(sh), lastCol = sh.getLastColumn(), row = new Array(lastCol).fill('');
 
     var submissionId = safeTrim_(formData.submissionId).slice(0, 64);
@@ -1342,7 +1367,10 @@ function submitResponse(formData) {
       var col = idxOf_(hdr, names);
       if (col >= 0) row[col] = safeSheetValue_(value);
     }
-    put(['timestamp'], new Date());
+    // One server time, used for both the response and the notice: the notice
+    // counts as presented at the moment its form was submitted.
+    var submittedAt = new Date();
+    put(['timestamp'], submittedAt);
     put(['responseid'], referenceId);
     put(['submissionid'], submissionId);
     put(['transactiondate'], Utilities.formatDate(transactionDate, timezone_(), 'yyyy-MM-dd'));
@@ -1373,6 +1401,21 @@ function submitResponse(formData) {
     put(['coadateto'], wantsCoa && coaTo ? Utilities.formatDate(coaTo, timezone_(), 'yyyy-MM-dd') : '');
     put(['coastatus'], wantsCoa ? 'REQUESTED' : 'NONE');
     put(['verificationcode'], wantsCoa ? makeVerificationCode_() : '');
+
+    // Which Privacy Notice was on screen, and when. Recorded only when the
+    // form reports a version: a browser still running a page from before the
+    // notice existed never showed one, and stamping it anyway would put a
+    // record in the sheet saying the notice was presented when it was not.
+    // Nothing here records consent — the notice documents how information is
+    // processed, and processing does not rest on agreement to it.
+    var noticeVersion = safeTrim_(formData.privacyNoticeVersion);
+    if (/^\d{1,3}(\.\d{1,3}){0,2}$/.test(noticeVersion)) {
+      // Leading apostrophe: written bare, Sheets reads "1.0" as the number 1
+      // and the version is gone. Sheets keeps the apostrophe as formatting, so
+      // the cell reads back as the text "1.0".
+      put(['privacy_notice_version'], "'" + noticeVersion);
+      put(['privacy_notice_presented_at'], submittedAt);
+    }
 
     sh.getRange(sh.getLastRow() + 1, 1, 1, lastCol).setValues([row]);
     invalidateResultCache_();

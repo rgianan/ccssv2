@@ -102,6 +102,7 @@ function adminSaveCoaDetails(payload, adminToken) {
   if (!name || !agency || !purpose || !from)
     throw new Error('Name, agency, purpose, and the date of appearance are all required.');
   if (to && to < from) throw new Error('The end date cannot be earlier than the start date.');
+  if (isAfterToday_(from)) throw new Error('The date of appearance cannot be in the future.');
 
   var cells = {
     coatitle: title,
@@ -454,6 +455,13 @@ function issueCoa_(responseId, issueKey, outputFolder, expectedStatus) {
   if (!record.coaRequested) throw new Error('This response did not request a Certificate of Appearance.');
   if (!record.coaName || !record.coaAgency || !record.coaPurpose || !record.coaDateFrom)
     throw new Error('Complete the certificate details before issuing.');
+  // Checked again here, where the document is made, not only where the date is
+  // entered: a request submitted before the rule existed can still carry a
+  // future date, and issuing it would sign a certificate for an appearance that
+  // has not happened. Nothing has been written yet.
+  if (isAfterToday_(parseDate_(record.coaDateFrom)))
+    throw new Error('The date of appearance (' + record.coaDateFrom + ') is still in the future. ' +
+      'Correct it, or issue the certificate on or after that day.');
 
   var settings = readSettings_();
   var templateId = safeTrim_(settings.coa_template_id);

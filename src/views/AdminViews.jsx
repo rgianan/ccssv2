@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   Bell,
+  ChevronDown,
   ClipboardList,
   FileSignature,
   FileSpreadsheet,
@@ -10,10 +11,12 @@ import {
   ListChecks,
   LogIn,
   LogOut,
+  Menu,
   Search,
   Settings2,
   ShieldCheck,
   Users,
+  X,
 } from "lucide-react";
 import {
   adminLogin,
@@ -364,7 +367,10 @@ export function AdminDashboard() {
   const [session, setSession] = useState(readAdminSession),
     [tab, setTab] = useState("overview"),
     [period, setPeriod] = useState(currentPeriod),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    // The narrow-screen menu. Below 900px the sidebar is a bar with one button;
+    // the tabs used to sit in a strip that ran off the right edge of the window.
+    [menuOpen, setMenuOpen] = useState(false);
 
   async function signOut() {
     try {
@@ -426,11 +432,28 @@ export function AdminDashboard() {
     };
   }, [session?.token]);
 
+  // Escape hides the list, and with it whichever tab had focus; focus goes back
+  // to the button that opened it rather than falling to the page.
+  const menuToggle = useRef(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      menuToggle.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   if (!session)
     return (
       <AdminLogin
         onAuthenticated={(fresh) => {
           checkedToken.current = fresh?.token || "";
+          // Signing out happens from inside the open menu on a phone; without
+          // this the next sign-in arrives with the menu still open.
+          setMenuOpen(false);
           setSession(fresh);
         }}
       />
@@ -442,9 +465,24 @@ export function AdminDashboard() {
 
   return (
     <div className="admin-layout">
-      <aside>
+      <aside className={menuOpen ? "menu-open" : ""}>
         <Brand subtitle="Admin module" light />
-        <nav>
+        {/* Shown only below 900px. The tabs and the profile — with Sign out,
+            which a hidden profile used to take with it — open under the bar,
+            one full-width row each, so every label is read rather than
+            guessed from an icon. */}
+        <button
+          ref={menuToggle}
+          type="button"
+          className="nav-toggle"
+          aria-expanded={menuOpen}
+          aria-controls="admin-nav"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          {menuOpen ? <X /> : <Menu />}
+          {menuOpen ? "Close" : "Menu"}
+        </button>
+        <nav id="admin-nav">
           {visibleTabs.map((entry) => {
             const Icon = entry.icon;
             return (
@@ -460,6 +498,7 @@ export function AdminDashboard() {
                   onClick={() => {
                     setTab(entry.id);
                     setError("");
+                    setMenuOpen(false);
                   }}
                 >
                   <Icon /> {entry.label}
@@ -564,6 +603,23 @@ export function AdminDashboard() {
   );
 }
 
+/**
+ * What each overview figure counts. Shown as the icon's tooltip and again in a
+ * glossary under the cards: the tooltip needs a mouse — its icon cannot even
+ * take keyboard focus — and these are the definitions a reader needs to trust
+ * the numbers, N/A handling included.
+ */
+const STAT_HELP = {
+  responses:
+    "Submissions whose transaction date falls inside this reporting period.",
+  overall:
+    "The mean of every rated SQD answer in the period, weighted by respondent. N/A answers are left out rather than counted as zero.",
+  certificates:
+    "Issued counts this period. The awaiting figure spans every period, because a request left unissued does not expire.",
+  charter:
+    "Respondents who answered CC1 with one of the first three options — that is, who knew of a Citizen's Charter or saw this office's.",
+};
+
 const scoreLabel = (value) =>
   value >= 4.5
     ? "Outstanding"
@@ -652,10 +708,7 @@ function OverviewPanel({ period, onError }) {
         <article>
           <span>Responses · {describePeriod(period)}</span>
           <strong>{(data?.totalResponses ?? 0).toLocaleString()}</strong>
-          <Tip
-            align="end"
-            text="Submissions whose transaction date falls inside this reporting period."
-          >
+          <Tip align="end" text={STAT_HELP.responses}>
             <i className="brand">
               <Inbox />
             </i>
@@ -665,10 +718,7 @@ function OverviewPanel({ period, onError }) {
           <span>Overall score</span>
           <strong>{overall ? overall.toFixed(2) : "—"}</strong>
           <small className="stat-note">{scoreLabel(overall)}</small>
-          <Tip
-            align="end"
-            text="The mean of every rated SQD answer in the period, weighted by respondent. N/A answers are left out rather than counted as zero."
-          >
+          <Tip align="end" text={STAT_HELP.overall}>
             <i className="gold">
               <BarChart3 />
             </i>
@@ -681,10 +731,7 @@ function OverviewPanel({ period, onError }) {
             {(data?.coa?.pending ?? 0).toLocaleString()} awaiting release (all
             periods)
           </small>
-          <Tip
-            align="end"
-            text="Issued counts this period. The awaiting figure spans every period, because a request left unissued does not expire."
-          >
+          <Tip align="end" text={STAT_HELP.certificates}>
             <i className="teal">
               <FileSignature />
             </i>
@@ -697,16 +744,26 @@ function OverviewPanel({ period, onError }) {
           <strong>
             {data?.totalResponses ? `${data.ccAwareness ?? 0}%` : "—"}
           </strong>
-          <Tip
-            align="end"
-            text="Respondents who answered CC1 with one of the first three options — that is, who knew of a Citizen's Charter or saw this office's."
-          >
+          <Tip align="end" text={STAT_HELP.charter}>
             <i className="brand">
               <ShieldCheck />
             </i>
           </Tip>
         </article>
       </section>
+      <details className="info-details">
+        <summary>How these figures are counted</summary>
+        <dl>
+          <dt>Responses</dt>
+          <dd>{STAT_HELP.responses}</dd>
+          <dt>Overall score</dt>
+          <dd>{STAT_HELP.overall}</dd>
+          <dt>Certificates issued</dt>
+          <dd>{STAT_HELP.certificates}</dd>
+          <dt>Aware of the Citizen's Charter</dt>
+          <dd>{STAT_HELP.charter}</dd>
+        </dl>
+      </details>
 
       <section className="panel-grid">
         <article className="panel">
@@ -841,14 +898,21 @@ const PAGE_SIZE = 100;
  * What the certificate column's four words mean, said once on the header
  * rather than on every row.
  */
-/** Every value this column can hold. A status missing from here is one the
- *  reader meets with nothing to explain it. */
-const COA_COLUMN_HELP =
-  "REQUESTED — asked for, not yet issued. PROCESSING — being issued now; if it " +
-  "stays, the attempt was cut off. ISSUED — generated and emailed. " +
-  "DECLINED — the office refused it, with a reason on the Certificates tab. " +
-  "ERROR — the last attempt failed; retry from the Certificates tab. " +
-  "NONE — this client did not ask for one.";
+/** Every value the COA column can hold. A status missing from here is one the
+ *  reader meets with nothing to explain it. One list, rendered twice: as the
+ *  column header's tooltip, and as a glossary under the table that opens by tap
+ *  — tooltips do not show at all on a device that cannot hover. */
+const COA_STATUS_GLOSSARY = [
+  ["REQUESTED", "Asked for, not yet issued."],
+  ["PROCESSING", "Being issued now; if it stays, the attempt was cut off."],
+  ["ISSUED", "Generated and emailed."],
+  ["DECLINED", "The office refused it, with a reason on the Certificates tab."],
+  ["ERROR", "The last attempt failed; retry from the Certificates tab."],
+  ["NONE", "This client did not ask for one."],
+];
+const COA_COLUMN_HELP = COA_STATUS_GLOSSARY.map(
+  ([status, meaning]) => `${status} — ${meaning}`,
+).join(" ");
 
 /** Named once, so the placeholder table and the real one cannot drift apart. */
 const RESPONSE_COLUMNS = [
@@ -922,7 +986,7 @@ function ChangeProgram({ row, onDone, onError }) {
 
   if (error && !services)
     return <div className="alert reclassify-alert">{error}</div>;
-  if (!services) return <Skeleton width={260} height={38} radius={10} />;
+  if (!services) return <Skeleton width={260} height={38} />;
 
   return (
     <form className="reclassify" onSubmit={submit}>
@@ -1046,7 +1110,7 @@ function ResponsesPanel({ onError }) {
               style={{ display: "block", marginTop: 9 }}
             />
           </div>
-          <Skeleton width={300} height={38} radius={10} />
+          <Skeleton width={300} height={38} />
         </div>
         <SkeletonTable
           columns={RESPONSE_COLUMNS}
@@ -1108,6 +1172,17 @@ function ResponsesPanel({ onError }) {
           )}
         </form>
       </div>
+      <details className="info-details">
+        <summary>What the COA statuses mean</summary>
+        <dl>
+          {COA_STATUS_GLOSSARY.map(([status, meaning]) => (
+            <React.Fragment key={status}>
+              <dt>{status}</dt>
+              <dd>{meaning}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      </details>
       {notice && (
         <div className="notice reclassify-notice" role="status">
           {notice}
@@ -1139,7 +1214,20 @@ function ResponsesPanel({ onError }) {
               <React.Fragment key={row.referenceId}>
                 <tr>
                   <td>
-                    <strong>{row.referenceId}</strong>
+                    {/* The reference opens the row. On a phone the table
+                        scrolls inside its card and Details is the last of
+                        eight columns, out of view; the reference is the first
+                        thing on the row. */}
+                    <button
+                      type="button"
+                      className="ref-toggle"
+                      aria-expanded={expanded === row.referenceId}
+                      aria-controls={`response-details-${row.referenceId}`}
+                      onClick={() => toggleDetails(row.referenceId)}
+                    >
+                      {row.referenceId}
+                      <ChevronDown aria-hidden="true" />
+                    </button>
                     <small>{row.email}</small>
                   </td>
                   <td>{row.transactionDate}</td>
@@ -1169,8 +1257,13 @@ function ResponsesPanel({ onError }) {
                     </span>
                   </td>
                   <td>
+                    {/* Kept for the mouse, where the end of the row is where
+                        people look for it; out of the tab order, since the
+                        reference already does this and a second stop per row
+                        is a hundred more presses of Tab. */}
                     <button
                       className="mini-button"
+                      tabIndex={-1}
                       aria-expanded={expanded === row.referenceId}
                       onClick={() => toggleDetails(row.referenceId)}
                     >
@@ -1179,7 +1272,10 @@ function ResponsesPanel({ onError }) {
                   </td>
                 </tr>
                 {expanded === row.referenceId && (
-                  <tr className="detail-row">
+                  <tr
+                    className="detail-row"
+                    id={`response-details-${row.referenceId}`}
+                  >
                     <td colSpan={8}>
                       <div className="answer-grid">
                         {CC_QUESTIONS.map((question) => (

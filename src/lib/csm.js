@@ -280,22 +280,31 @@ export const SQD_QUESTIONS = [
  * automatically, which is both clearer for the client and better data than
  * asking them to classify their own answer as inapplicable.
  */
+/**
+ * The Filipino labels carry soft hyphens (\u00AD) at a few syllable breaks —
+ * few on purpose: one after every syllable let a word split as "Su- / ma-". On a
+ * phone each option is about 50px wide at a readable 12px, narrower than
+ * "Sumasang-ayon" or "Kinikilingan"; without break points the browser split
+ * them wherever the column ran out, with no hyphen to say so ("Sumasa / ng-ayon").
+ * Soft hyphens are invisible unless a word breaks, and the stored answer is the
+ * `value`, never these labels.
+ */
 export const SQD_SCALE = [
   {
     value: "1",
     emoji: "😢",
     en: "Strongly Disagree",
-    tl: "Lubos na Hindi Sumasang-ayon",
+    tl: "Lubos na Hindi Suma\u00ADsang-a\u00ADyon",
   },
-  { value: "2", emoji: "🙁", en: "Disagree", tl: "Hindi Sumasang-ayon" },
+  { value: "2", emoji: "🙁", en: "Disagree", tl: "Hindi Suma\u00ADsang-a\u00ADyon" },
   {
     value: "3",
     emoji: "😐",
     en: "Neither Agree nor Disagree",
-    tl: "Walang Kinikilingan",
+    tl: "Walang Kinikili\u00ADngan",
   },
-  { value: "4", emoji: "🙂", en: "Agree", tl: "Sumasang-ayon" },
-  { value: "5", emoji: "😄", en: "Strongly Agree", tl: "Lubos na Sumasang-ayon" },
+  { value: "4", emoji: "🙂", en: "Agree", tl: "Suma\u00ADsang-a\u00ADyon" },
+  { value: "5", emoji: "😄", en: "Strongly Agree", tl: "Lubos na Suma\u00ADsang-a\u00ADyon" },
 ];
 
 /**

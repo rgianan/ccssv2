@@ -18,8 +18,9 @@
   color: var(--ink);
 }
 .survey-intro > p:not(.eyebrow) {
-  color: var(--muted);
-  font-size: 14.5px;
+  /* On the cream page ground, where --muted measured 4.47:1. */
+  color: var(--muted-strong);
+  font-size: var(--text-body);
   line-height: 1.75;
   max-width: 460px;
 }
@@ -38,19 +39,19 @@
   height: 40px;
   background: var(--sky);
   color: var(--blue);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 .privacy-note strong,
 .privacy-note span {
   display: block;
 }
 .privacy-note strong {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.6;
   font-weight: 700;
 }
 .privacy-note span {
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   color: var(--muted);
   margin-top: 6px;
   font-weight: 500;
@@ -59,7 +60,7 @@
 .survey-card {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 22px;
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow);
   overflow: hidden;
 }
@@ -68,7 +69,7 @@
   justify-content: space-between;
   gap: 14px;
   padding: 21px 28px 17px;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .step-header span {
   color: var(--muted);
@@ -104,12 +105,13 @@
   display: grid;
   place-items: center;
   background: #ebf4fc;
-  color: #5277ac;
-  border-radius: 13px;
-  font: 800 13px Manrope, sans-serif;
+  /* #5277ac read at 4.1:1 on this fill; this keeps the hue at 5.4:1. */
+  color: #3d63a0;
+  border-radius: var(--radius-control);
+  font: 800 var(--text-small) Manrope, sans-serif;
 }
 .section-heading h2 {
-  font: 800 20px Manrope, sans-serif;
+  font: 800 var(--text-heading) Manrope, sans-serif;
   margin: 0;
   color: #283653;
   line-height: 1.35;
@@ -117,7 +119,7 @@
 .section-heading p {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-small);
   line-height: 1.65;
 }
 
@@ -128,7 +130,7 @@
 }
 .field-block legend {
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-small);
   color: #343f55;
   margin-bottom: 11px;
   display: flex;
@@ -137,7 +139,8 @@
   line-height: 1.5;
 }
 .field-block legend b {
-  color: #d56955;
+  /* Matches `label b` in base.css: 6.3:1, where #d56955 read at 3.5:1. */
+  color: #b3261e;
 }
 
 .choice-group {
@@ -155,11 +158,11 @@
   gap: 11px;
   align-items: start;
   border: 1px solid #e1e8ee;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 13px 15px;
   margin: 0;
   font-weight: 500;
-  font-size: 13px;
+  font-size: var(--text-small);
   color: #434e62;
   background: #fff;
   cursor: pointer;
@@ -180,7 +183,7 @@
   width: 17px;
   height: 17px;
   margin-top: 2px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   border: 1.5px solid #bbc6d3;
   background: #fff;
   transition: 0.15s ease;
@@ -230,11 +233,12 @@
 .sqd-number {
   flex: none;
   display: inline-block;
-  font: 800 9.5px Manrope, sans-serif;
-  letter-spacing: 0.09em;
+  /* 12px: "CC1", "SQD5" name the question an answer is filed under. */
+  font: 800 var(--text-caption) Manrope, sans-serif;
+  letter-spacing: 0.05em;
   color: var(--blue);
   background: var(--sky);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 4px 7px;
 }
 
@@ -249,7 +253,7 @@
   gap: 9px;
   align-items: start;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--text-small);
   color: #343f55;
   margin-bottom: 10px;
   line-height: 1.5;
@@ -270,7 +274,7 @@
   position: relative;
   margin: 0;
   border: 1px solid #e1e8ee;
-  border-radius: 11px;
+  border-radius: var(--radius-control);
   background: #fff;
   padding: 11px 3px 8px;
   color: #667386;
@@ -295,16 +299,19 @@
   font-size: 20px;
   line-height: 1;
 }
-/* 8px was set when six options had to share the row and is below what anyone
-   should be asked to read; the emoji carries the meaning at a glance but the
-   words are what disambiguate the middle three. Five columns leave room for
-   this. */
+/* 12px at every width: the emoji carries the meaning at a glance, but the
+   words are what tell the middle three apart, and on a phone they were down to
+   9px. Longer labels wrap onto more lines rather than shrink. A Filipino word
+   wider than its column breaks at the soft hyphens in SQD_SCALE; anything else
+   too long breaks anywhere rather than spilling into the next option. */
 .sqd-option small {
   display: block;
-  font-size: 9.5px;
-  font-weight: 700;
+  font-size: var(--text-caption);
+  font-weight: 600;
   margin-top: 6px;
   line-height: 1.25;
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 .sqd-option.selected {
   background: var(--blue);
@@ -356,13 +363,13 @@
 .review-summary {
   background: #f6f9fd;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   padding: 18px 20px;
   margin-bottom: 22px;
 }
 .review-summary h3 {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--text-small);
   color: var(--blue);
 }
 .review-summary dl {
@@ -376,13 +383,14 @@
   gap: 10px;
 }
 .review-summary dt {
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   font-weight: 700;
-  color: var(--muted);
+  /* The summary panel is tinted, where --muted measured 4.49:1. */
+  color: var(--muted-strong);
 }
 .review-summary dd {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--text-small);
   color: #37435a;
 }
 
@@ -394,6 +402,26 @@
   gap: 12px;
 }
 
+/* ------------------------------ Invalid fields ----------------------------- */
+
+/* What a failed Continue found blank or wrong. Marked in the error red at the
+   same weight as the focus ring, so a field reads as "look here" rather than
+   as a different kind of control; the message under the form names each one. */
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: #b3261e;
+  box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.14);
+}
+.choice-group.invalid .choice,
+.sqd-item.invalid .sqd-option {
+  border-color: #b3261e;
+}
+.sqd-item.invalid legend .sqd-number {
+  background: #fdecea;
+  color: #b3261e;
+}
+
 /* ----------------------------- Privacy notice ----------------------------- */
 
 /* The line above Submit. Muted like the helper text elsewhere on the form, but
@@ -402,7 +430,7 @@
    rule above it, and sharing the name restyled each with the other's rules. */
 .submit-privacy-notice {
   margin: 22px 0 0;
-  font-size: 12.5px;
+  font-size: var(--text-small);
   line-height: 1.65;
   color: var(--muted);
 }
@@ -428,7 +456,7 @@
 .link-button:focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-control);
 }
 
 .privacy-dialog {
@@ -437,7 +465,7 @@
   max-height: calc(100dvh - 32px);
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   background: #fff;
   color: var(--ink);
   box-shadow: 0 24px 60px rgba(16, 34, 60, 0.22);
@@ -465,7 +493,7 @@
 }
 .privacy-dialog-head h2 {
   margin: 0;
-  font: 800 19px/1.2 Manrope, sans-serif;
+  font: 800 var(--text-heading)/1.2 Manrope, sans-serif;
   color: var(--ink);
 }
 .privacy-dialog-close {
@@ -475,7 +503,7 @@
   width: 36px;
   height: 36px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: #fff;
   color: var(--muted);
   cursor: pointer;
@@ -491,17 +519,26 @@
   /* Reaching the end of the notice must not start scrolling the form behind. */
   overscroll-behavior: contain;
   padding: 18px 26px 22px;
-  font-size: 13.5px;
+  font-size: var(--text-small);
   line-height: 1.7;
   color: #4d5563;
 }
 .privacy-dialog-body h3 {
   margin: 22px 0 6px;
-  font: 700 14.5px/1.35 Manrope, sans-serif;
+  font: 700 var(--text-body)/1.35 Manrope, sans-serif;
   color: var(--ink);
 }
 .privacy-dialog-body p {
   margin: 0 0 10px;
+}
+/* Filipino mode, while the notice exists only in English. */
+.privacy-dialog-body .privacy-dialog-language {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid #3d63a0;
+  border-radius: var(--radius-control);
+  background: #eef3fb;
+  color: var(--ink);
 }
 .privacy-dialog-body ul {
   margin: 0 0 12px;
@@ -515,7 +552,7 @@
   padding: 12px 14px;
   background: var(--cream);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
 }
 .privacy-dialog-body a {
   color: var(--blue);
@@ -531,7 +568,7 @@
 }
 .privacy-dialog-foot small {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--text-caption);
 }
 
 @media (max-width: 620px) {
@@ -539,7 +576,7 @@
     width: calc(100vw - 16px);
     max-height: calc(100vh - 16px);
     max-height: calc(100dvh - 16px);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
   }
   .privacy-dialog-inner {
     max-height: calc(100vh - 18px);
@@ -552,7 +589,7 @@
   }
   .privacy-dialog-body {
     padding: 16px 18px 20px;
-    font-size: 13px;
+    font-size: var(--text-small);
   }
 }
 
@@ -571,14 +608,14 @@
   text-align: center;
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 25px;
+  border-radius: var(--radius-card);
   padding: 52px;
   box-shadow: var(--shadow);
 }
 .success-icon {
   width: 70px;
   height: 70px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--blue);
   color: #fff;
   display: grid;
@@ -593,17 +630,17 @@
   justify-content: center;
 }
 .success-card h1 {
-  font: 800 34px/1.15 Manrope, sans-serif;
+  font: 800 var(--text-display)/1.15 Manrope, sans-serif;
   color: var(--blue);
   margin: 0 0 14px;
 }
 .success-card > p {
   color: var(--muted);
   line-height: 1.7;
-  font-size: 14.5px;
+  font-size: var(--text-body);
 }
 .reference-id {
-  font-size: 12.5px;
+  font-size: var(--text-small);
 }
 .success-coa {
   display: flex;
@@ -612,7 +649,7 @@
   align-items: start;
   background: var(--blue-soft);
   border: 1px solid #c9ddf2;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   padding: 16px 18px;
   margin: 24px 0 0;
 }
@@ -625,12 +662,12 @@
 }
 .success-coa strong {
   display: block;
-  font-size: 13px;
+  font-size: var(--text-small);
   color: #2c3b59;
 }
 .success-coa span {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: #576a87;
   margin-top: 5px;
   line-height: 1.6;
@@ -661,6 +698,10 @@
   .form-body {
     padding: 24px 18px;
   }
+  /* A step down the scale: beside the number badge, 22px took three lines. */
+  .section-heading h2 {
+    font-size: var(--text-lead);
+  }
   .choice-group.cols-2,
   .choice-group.cols-3 {
     grid-template-columns: 1fr;
@@ -673,9 +714,6 @@
   }
   .sqd-option {
     padding: 9px 2px 7px;
-  }
-  .sqd-option small {
-    font-size: 9px;
   }
   .review-summary dl > div {
     grid-template-columns: 1fr;

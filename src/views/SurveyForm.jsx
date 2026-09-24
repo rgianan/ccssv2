@@ -68,6 +68,9 @@ const newSubmissionId = () =>
  */
 const EARLIEST_TRANSACTION_DATE = "2000-01-01";
 
+/** The fields a date rule's own sentence (`problem`) already explains. */
+const DATE_FIELDS = new Set(["coaDateFrom", "coaDateTo", "transactionDate"]);
+
 /**
  * A fresh form carries a fresh submission id, sent with the response and held
  * steady across every retry of that response. A submission that reached the
@@ -111,9 +114,16 @@ function ChoiceGroup({
   onChange,
   language,
   columns = 1,
+  invalid = false,
 }) {
   return (
-    <div className={`choice-group cols-${columns}`} role="radiogroup">
+    <div
+      className={`choice-group cols-${columns}${invalid ? " invalid" : ""}`}
+      role="radiogroup"
+      data-field={name}
+      aria-invalid={invalid || undefined}
+      aria-describedby={invalid ? "form-error" : undefined}
+    >
       {options.map((option) => (
         <label
           key={option.value}
@@ -134,9 +144,13 @@ function ChoiceGroup({
   );
 }
 
-function SqdRating({ question, value, onChange, language }) {
+function SqdRating({ question, value, onChange, language, invalid = false }) {
   return (
-    <fieldset className="sqd-item">
+    <fieldset
+      className={`sqd-item${invalid ? " invalid" : ""}`}
+      data-field={question.id}
+      aria-describedby={invalid ? "form-error" : undefined}
+    >
       <legend>
         <span className="sqd-number">{question.number}</span>
         <Bilingual entry={question} language={language} />
@@ -194,6 +208,7 @@ export function SurveyForm() {
     // open flag: see PrivacyNoticeDialog for why a flag could get stuck.
     [privacyOpens, setPrivacyOpens] = useState(0),
     [turnstileReset, setTurnstileReset] = useState(0);
+  const privacyNote = PRIVACY_NOTE[language] || PRIVACY_NOTE.en;
 
   // `fresh` skips the cached copy. The recovery path below runs because the
   // backend has just told us our copy of the programme list is out of date, so
@@ -261,42 +276,132 @@ export function SurveyForm() {
     form.transactionDate <= portalToday() &&
     form.transactionDate >= EARLIEST_TRANSACTION_DATE;
 
-  const valid = useMemo(() => {
-    if (step === 0)
-      return (
-        form.wantsCoa === "no" ||
-        (wantsCoa &&
-          form.coaName.trim() &&
-          form.coaAgency.trim() &&
-          form.coaPurpose.trim() &&
-          form.coaDateFrom &&
-          appearanceNotFuture &&
-          datesOrdered)
-      );
-    // The same rules the backend applies. Looser ones here let "a@b@c.d", an
-    // age of 25.5 or a future date through every step, only for Submit to be
-    // refused at the end, with the field that caused it three steps back.
-    if (step === 1)
-      return (
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
-        form.clientType &&
-        transactionDateOk &&
-        form.region &&
-        form.serviceId &&
-        (!isOtherService || form.otherService.trim()) &&
-        (!form.age ||
-          (/^\d{1,3}$/.test(form.age) &&
-            Number(form.age) >= 1 &&
-            Number(form.age) <= 120))
-      );
+  /**
+   * What stops this step, in the order it appears on screen: each entry names
+   * a field (`key`, matching its `data-field`) in both languages, and says
+   * whether it is blank or filled in wrongly.
+   *
+   * A list rather than the yes/no this used to be. "Please complete every
+   * required answer" named nothing, marked nothing and moved nothing, so on a
+   * long step the client scrolled back through it looking for what was wrong.
+   * `valid` is derived from this, so the gate, the message and the marked
+   * fields cannot disagree.
+   *
+   * The rules are the backend's: looser ones here let "a@b@c.d", an age of
+   * 25.5 or a future date through every step, only for Submit to be refused at
+   * the end, three steps from the field that caused it.
+   */
+  const invalidFields = useMemo(() => {
+    const out = [];
+    const flag = (key, en, tl, kind = "missing") =>
+      out.push({ key, en, tl, kind });
+    if (step === 0) {
+      if (!form.wantsCoa)
+        flag(
+          "wantsCoa",
+          "whether you need a Certificate of Appearance",
+          "kung kailangan ninyo ng Certificate of Appearance",
+        );
+      if (wantsCoa) {
+        if (!form.coaName.trim())
+          flag("coaName", "Full name of client", "Buong pangalan ng kliyente");
+        if (!form.coaAgency.trim())
+          flag(
+            "coaAgency",
+            "Agency / school / company",
+            "Ahensya / paaralan / kompanya",
+          );
+        if (!form.coaPurpose.trim())
+          flag("coaPurpose", "Purpose of appearance", "Layunin ng pagpunta");
+        if (!form.coaDateFrom)
+          flag("coaDateFrom", "Date of appearance", "Petsa ng pagpunta");
+        else if (!appearanceNotFuture)
+          flag(
+            "coaDateFrom",
+            "Date of appearance",
+            "Petsa ng pagpunta",
+            "invalid",
+          );
+        if (!datesOrdered) flag("coaDateTo", "Until", "Hanggang", "invalid");
+      }
+    }
+    if (step === 1) {
+      const email = form.email.trim();
+      if (!email) flag("email", "Email", "Email");
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+        flag("email", "Email", "Email", "invalid");
+      if (!form.clientType)
+        flag("clientType", "Client type", "Uri ng kliyente");
+      if (!form.transactionDate)
+        flag("transactionDate", "Date of transaction", "Petsa ng transaksyon");
+      else if (!transactionDateOk)
+        flag(
+          "transactionDate",
+          "Date of transaction",
+          "Petsa ng transaksyon",
+          "invalid",
+        );
+      if (
+        form.age &&
+        !(
+          /^\d{1,3}$/.test(form.age) &&
+          Number(form.age) >= 1 &&
+          Number(form.age) <= 120
+        )
+      )
+        flag("age", "Age (1 to 120)", "Edad (1 hanggang 120)", "invalid");
+      if (!form.region)
+        flag("region", "Region of residence", "Rehiyon ng tirahan");
+      if (!form.serviceId)
+        flag("serviceId", "Service availed", "Serbisyong nakuha");
+      if (isOtherService && !form.otherService.trim())
+        flag(
+          "otherService",
+          "Name of the service you availed",
+          "Pangalan ng serbisyong nakuha",
+        );
+    }
     if (step === 2)
-      return ccApplicable(cc).every((question) => cc[question.id]);
+      ccApplicable(cc).forEach((question) => {
+        if (!cc[question.id])
+          flag(question.id, question.number, question.number);
+      });
     if (step === 3)
-      return sqdApplicable(ratedService).every((question) => sqd[question.id]);
-    return true;
+      sqdApplicable(ratedService).forEach((question) => {
+        if (!sqd[question.id])
+          flag(question.id, question.number, question.number);
+      });
+    return out;
     // ratedService matters here: which SQD questions are required depends on
     // it, and it resolves only once the service list has loaded.
-  }, [step, form, cc, sqd, wantsCoa, isOtherService, ratedService]);
+  }, [
+    step,
+    form,
+    cc,
+    sqd,
+    wantsCoa,
+    isOtherService,
+    ratedService,
+    appearanceNotFuture,
+    datesOrdered,
+    transactionDateOk,
+  ]);
+  const valid = invalidFields.length === 0;
+
+  // Marking waits for the first failed Continue: a form that opens already red
+  // is telling someone off for fields they have not reached.
+  const [showInvalid, setShowInvalid] = useState(false);
+  const invalidKeys = useMemo(
+    () => new Set(invalidFields.map((field) => field.key)),
+    [invalidFields],
+  );
+  const isInvalid = (key) => showInvalid && invalidKeys.has(key);
+  /** Spread onto a field's own control: marks it, and points it at the message. */
+  const fieldProps = (key) => ({
+    "data-field": key,
+    "aria-invalid": isInvalid(key) || undefined,
+    "aria-describedby": isInvalid(key) ? "form-error" : undefined,
+  });
 
   /**
    * Why the step cannot be left, when the reason is not a blank field.
@@ -345,15 +450,99 @@ export function SurveyForm() {
   // clicks read the pre-render value of the state flag.
   const submitting = useRef(false);
 
+  /**
+   * The sentence under the form when a step cannot be left. The fields are
+   * named, up to three, blank ones and wrong ones told apart; a date rule says
+   * exactly what is wrong (`problem`) in place of the "check" list, but still
+   * after the blank fields, which it would otherwise hide.
+   */
+  const validationMessage = () => {
+    const tl = language === "tl";
+    const list = (fields) => {
+      const names = fields.map((field) => (tl ? field.tl : field.en));
+      const more = names.length - 3;
+      return (
+        names.slice(0, 3).join(", ") +
+        (more > 0 ? (tl ? `, at ${more} pa` : `, and ${more} more`) : "")
+      );
+    };
+    const missing = invalidFields.filter((field) => field.kind === "missing");
+    const wrong = invalidFields.filter((field) => field.kind === "invalid");
+    const parts = [];
+    if (missing.length)
+      parts.push(
+        `${tl ? "Pakikumpleto" : "Please complete"}: ${list(missing)}.`,
+      );
+    if (problem) parts.push(problem);
+    // Every `problem` is about a date; any other wrong field is still listed.
+    const others = problem
+      ? wrong.filter((field) => !DATE_FIELDS.has(field.key))
+      : wrong;
+    if (others.length)
+      parts.push(`${tl ? "Pakisuri" : "Please check"}: ${list(others)}.`);
+    return (
+      parts.join(" ") ||
+      (tl
+        ? "Pakikumpleto ang lahat ng kinakailangang sagot bago magpatuloy."
+        : "Please complete every required answer before continuing.")
+    );
+  };
+  // The message this form put up, so it can be kept current — or cleared once
+  // the step is complete — without touching an error the network put there.
+  const lastValidation = useRef("");
+
+  /** Scrolls the field into view and puts the cursor in it. */
+  const focusField = (key) => {
+    if (!key) return;
+    requestAnimationFrame(() => {
+      const target = document.querySelector(`[data-field="${key}"]`);
+      if (!target) return;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      const control = target.matches("input, select, textarea")
+        ? target
+        : target.querySelector("input:checked") ||
+          target.querySelector("input");
+      control?.focus({ preventScroll: true });
+    });
+  };
+
+  // Marking belongs to the step it was raised on, and so does its message:
+  // after Back, "Please complete: CC1, CC2" sat under a step with no CC1 on it.
+  // Only this form's own message goes — a step change the backend asked for
+  // (a withdrawn program, a new fee question) arrives with an error to keep.
+  useEffect(() => {
+    setShowInvalid(false);
+    const own = lastValidation.current;
+    if (own) {
+      // `own`, not the ref: the updater runs after the ref is cleared below.
+      setError((current) => (current === own ? "" : current));
+      lastValidation.current = "";
+    }
+  }, [step]);
+
+  // As fields are fixed the message follows, and goes once the step is done.
+  useEffect(() => {
+    if (
+      !showInvalid ||
+      !lastValidation.current ||
+      error !== lastValidation.current
+    )
+      return;
+    const message = valid ? "" : validationMessage();
+    lastValidation.current = message;
+    setError(message);
+  }, [invalidFields, problem, language]);
+
   async function next() {
     setError("");
-    if (!valid)
-      return setError(
-        problem ||
-          (language === "tl"
-            ? "Pakikumpleto ang lahat ng kinakailangang sagot bago magpatuloy."
-            : "Please complete every required answer before continuing."),
-      );
+    if (!valid) {
+      setShowInvalid(true);
+      const message = validationMessage();
+      lastValidation.current = message;
+      setError(message);
+      focusField(invalidFields[0]?.key);
+      return;
+    }
     if (step < STEPS.length - 1) {
       advance(1);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -625,6 +814,7 @@ export function SurveyForm() {
                 </label>
                 <ChoiceGroup
                   name="wantsCoa"
+                  invalid={isInvalid("wantsCoa")}
                   value={form.wantsCoa}
                   onChange={(value) => update("wantsCoa", value)}
                   language={language}
@@ -673,6 +863,7 @@ export function SurveyForm() {
                           : "Full name of client"}{" "}
                         <b>*</b>
                         <input
+                          {...fieldProps("coaName")}
                           value={form.coaName}
                           onChange={(event) =>
                             update("coaName", event.target.value)
@@ -688,6 +879,7 @@ export function SurveyForm() {
                         : "Agency / school / company"}{" "}
                       <b>*</b>
                       <input
+                        {...fieldProps("coaAgency")}
                         value={form.coaAgency}
                         onChange={(event) =>
                           update("coaAgency", event.target.value)
@@ -701,6 +893,7 @@ export function SurveyForm() {
                         : "Purpose of appearance"}{" "}
                       <b>*</b>
                       <input
+                        {...fieldProps("coaPurpose")}
                         value={form.coaPurpose}
                         onChange={(event) =>
                           update("coaPurpose", event.target.value)
@@ -716,7 +909,10 @@ export function SurveyForm() {
                           ? 'Isulat ito bilang pandugtong ng pangungusap: "…para sa layunin ng ___."'
                           : 'Write it so it completes the sentence "…for the purpose of ___."'}
                       </small>
-                      <small>{PURPOSE_PRIVACY_HELP}</small>
+                      <small>
+                        {PURPOSE_PRIVACY_HELP[language] ||
+                          PURPOSE_PRIVACY_HELP.en}
+                      </small>
                     </label>
                     <div className="field-grid">
                       <label>
@@ -727,6 +923,7 @@ export function SurveyForm() {
                         <input
                           type="date"
                           max={portalToday()}
+                          {...fieldProps("coaDateFrom")}
                           value={form.coaDateFrom}
                           onChange={(event) =>
                             update("coaDateFrom", event.target.value)
@@ -740,6 +937,7 @@ export function SurveyForm() {
                         <input
                           type="date"
                           min={form.coaDateFrom}
+                          {...fieldProps("coaDateTo")}
                           value={form.coaDateTo}
                           onChange={(event) =>
                             update("coaDateTo", event.target.value)
@@ -774,6 +972,7 @@ export function SurveyForm() {
                   {language === "tl" ? "Email" : "Email"} <b>*</b>
                   <input
                     type="email"
+                    {...fieldProps("email")}
                     value={form.email}
                     onChange={(event) => update("email", event.target.value)}
                     placeholder="you@example.com"
@@ -787,6 +986,7 @@ export function SurveyForm() {
                   </legend>
                   <ChoiceGroup
                     name="clientType"
+                    invalid={isInvalid("clientType")}
                     value={form.clientType}
                     onChange={(value) => update("clientType", value)}
                     language={language}
@@ -804,6 +1004,7 @@ export function SurveyForm() {
                       type="date"
                       min={EARLIEST_TRANSACTION_DATE}
                       max={portalToday()}
+                      {...fieldProps("transactionDate")}
                       value={form.transactionDate}
                       onChange={(event) =>
                         update("transactionDate", event.target.value)
@@ -816,6 +1017,7 @@ export function SurveyForm() {
                       type="number"
                       min="1"
                       max="120"
+                      {...fieldProps("age")}
                       value={form.age}
                       onChange={(event) => update("age", event.target.value)}
                       placeholder={language === "tl" ? "Edad" : "Age"}
@@ -840,6 +1042,7 @@ export function SurveyForm() {
                   <b>*</b>
                   <div className="select-wrap">
                     <select
+                      {...fieldProps("region")}
                       value={form.region}
                       onChange={(event) => update("region", event.target.value)}
                     >
@@ -876,7 +1079,7 @@ export function SurveyForm() {
                     >
                       {Array.from({ length: 4 }, (_, index) => (
                         <span className="choice choice-skeleton" key={index}>
-                          <Skeleton width={17} height={17} radius={9} />
+                          <Skeleton width={17} height={17} />
                           <Skeleton width={`${68 - index * 7}%`} />
                         </span>
                       ))}
@@ -884,6 +1087,7 @@ export function SurveyForm() {
                   ) : serviceOptions.length ? (
                     <ChoiceGroup
                       name="serviceId"
+                      invalid={isInvalid("serviceId")}
                       value={form.serviceId}
                       onChange={(value) => update("serviceId", value)}
                       language={language}
@@ -907,6 +1111,7 @@ export function SurveyForm() {
                         : "Please specify the service you availed"}{" "}
                       <b>*</b>
                       <input
+                        {...fieldProps("otherService")}
                         value={form.otherService}
                         onChange={(event) =>
                           update("otherService", event.target.value)
@@ -945,6 +1150,7 @@ export function SurveyForm() {
                     </legend>
                     <ChoiceGroup
                       name={question.id}
+                      invalid={isInvalid(question.id)}
                       value={cc[question.id]}
                       onChange={(value) =>
                         setCc((state) => ({ ...state, [question.id]: value }))
@@ -989,6 +1195,7 @@ export function SurveyForm() {
                 {sqdApplicable(ratedService).map((question) => (
                   <SqdRating
                     key={question.id}
+                    invalid={isInvalid(question.id)}
                     question={question}
                     language={language}
                     value={sqd[question.id]}
@@ -1071,7 +1278,11 @@ export function SurveyForm() {
               </>
             )}
 
-            {error && <div className="alert">{error}</div>}
+            {error && (
+              <div className="alert" id="form-error" role="alert">
+                {error}
+              </div>
+            )}
 
             {/* Shown on the step that submits, as the last thing above the
                 button — read before sending, not agreed to. There is
@@ -1080,16 +1291,16 @@ export function SurveyForm() {
                 backend records, rather than asking for consent. */}
             {step === STEPS.length - 1 && (
               <p className="submit-privacy-notice">
-                {PRIVACY_NOTE.before}
+                {privacyNote.before}
                 <button
                   type="button"
                   className="link-button"
                   aria-haspopup="dialog"
                   onClick={() => setPrivacyOpens((count) => count + 1)}
                 >
-                  {PRIVACY_NOTE.link}
+                  {privacyNote.link}
                 </button>
-                {PRIVACY_NOTE.after}
+                {privacyNote.after}
               </p>
             )}
           </div>
@@ -1156,7 +1367,7 @@ export function SurveyForm() {
           <dialog> sits in the browser's top layer wherever it is in the tree,
           and opening it only counts a click, so every answer and the security
           check already completed stay exactly as they were. */}
-      <PrivacyNoticeDialog openCount={privacyOpens} />
+      <PrivacyNoticeDialog openCount={privacyOpens} language={language} />
     </div>
   );
 }

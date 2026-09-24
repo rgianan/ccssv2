@@ -22,7 +22,7 @@
 }
 .verification-intro p {
   color: var(--muted);
-  font-size: 14.5px;
+  font-size: var(--text-body);
   line-height: 1.7;
   max-width: 520px;
   margin: 0 auto;
@@ -30,7 +30,7 @@
 .verification-card {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--radius-card);
   padding: 30px;
   box-shadow: var(--shadow);
 }
@@ -45,7 +45,7 @@
   display: flex;
   gap: 15px;
   align-items: start;
-  border-radius: 15px;
+  border-radius: var(--radius-card);
   padding: 20px;
   margin-top: 22px;
 }
@@ -54,7 +54,7 @@
   width: 34px;
   height: 34px;
   padding: 7px;
-  border-radius: 11px;
+  border-radius: var(--radius-control);
 }
 .verification-result.valid {
   background: var(--blue-soft);
@@ -73,7 +73,7 @@
   color: #fff;
 }
 .verification-result span {
-  font-size: 10.5px;
+  font-size: var(--text-caption);
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -84,12 +84,12 @@
 }
 .verification-result h2 {
   margin: 6px 0 14px;
-  font: 800 20px Manrope, sans-serif;
+  font: 800 var(--text-heading) Manrope, sans-serif;
   color: var(--ink);
 }
 .verification-result p {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: var(--text-small);
   line-height: 1.7;
   color: #7a5049;
 }
@@ -104,13 +104,13 @@
   gap: 10px;
 }
 .verification-result dt {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: #64748b;
 }
 .verification-result dd {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--text-small);
   color: #37435a;
   word-break: break-word;
 }
@@ -119,7 +119,7 @@
   align-items: center;
   gap: 6px;
   margin-top: 16px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 800;
   color: var(--blue);
 }

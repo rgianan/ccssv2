@@ -311,6 +311,12 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
           </button>
         </Tip>
       </div>
+      {/* What the chosen filter selects, in words, on every device. The same
+          sentence is each filter's tooltip, but tooltips do not show at all
+          where the screen cannot hover. */}
+      <p className="filter-caption" aria-live="polite">
+        {COA_FILTER_HELP[status]}
+      </p>
 
       <Feedback error={error} notice={notice} />
 
@@ -762,7 +768,7 @@ export function ReportsPanel({ period, onError }) {
                 style={{ display: "block", marginTop: 9 }}
               />
             </div>
-            <Skeleton width={150} height={40} radius={11} />
+            <Skeleton width={150} height={40} />
           </div>
           <SkeletonTable
             columns={["Program", "Clients", "Transactions"]}
@@ -1368,7 +1374,7 @@ export function SettingsPanel({ onError, canSign = false }) {
                 style={{ display: "block", marginTop: 9 }}
               />
             </div>
-            <Skeleton width={124} height={40} radius={11} />
+            <Skeleton width={124} height={40} />
           </div>
           <div className="settings-grid">
             {Array.from({ length: 9 }, (_, index) => (
@@ -1376,7 +1382,6 @@ export function SettingsPanel({ onError, canSign = false }) {
                 <Skeleton width="52%" height={11} />
                 <Skeleton
                   height={44}
-                  radius={11}
                   style={{ display: "block", marginTop: 8, width: "100%" }}
                 />
               </div>

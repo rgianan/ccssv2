@@ -298,7 +298,6 @@ export function LandingPage() {
                   <Skeleton
                     width={76}
                     height={32}
-                    radius={11}
                     style={{ display: "block", marginBottom: 14 }}
                   />
                   <Skeleton

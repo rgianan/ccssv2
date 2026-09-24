@@ -15,7 +15,13 @@ import React, { useId } from "react";
  * content will. That is the whole point of a skeleton over a spinner: nothing
  * moves when the data lands, so the eye does not have to find its place again.
  */
-export function Skeleton({ width, height = 14, radius = 6, style, ...rest }) {
+export function Skeleton({
+  width,
+  height = 14,
+  radius = "var(--radius-control)",
+  style,
+  ...rest
+}) {
   return (
     <span
       className="skeleton"

@@ -22,8 +22,8 @@
 }
 .landing-nav nav a {
   padding: 9px 13px;
-  border-radius: 9px;
-  font-size: 13px;
+  border-radius: var(--radius-control);
+  font-size: var(--text-small);
   font-weight: 700;
   color: #525d6f;
 }
@@ -75,7 +75,7 @@
 }
 .hero-lead {
   color: var(--muted);
-  font-size: 16.5px;
+  font-size: var(--text-lead);
   line-height: 1.7;
   max-width: 520px;
   margin: 0 0 30px;
@@ -98,7 +98,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: var(--text-small);
   font-weight: 700;
   color: #5f6a7b;
 }
@@ -109,7 +109,7 @@
 .hero-card {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: var(--radius-card);
   padding: 26px;
   box-shadow: var(--shadow);
   transform: rotate(-1.1deg);
@@ -125,13 +125,13 @@
   margin: 0;
 }
 .hero-card-head strong {
-  font: 800 11px Manrope, sans-serif;
+  font: 800 var(--text-caption) Manrope, sans-serif;
   color: var(--gold);
   letter-spacing: 0.04em;
   text-align: right;
 }
 .hero-card-question {
-  font-size: 14.5px;
+  font-size: var(--text-body);
   font-weight: 600;
   line-height: 1.55;
   color: #2f3b53;
@@ -139,13 +139,15 @@
 }
 .hero-scale {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* minmax(0, 1fr): at 12px a bare 1fr widened each column to its longest
+     word, and the five answers of the scale came out unequal. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 7px;
 }
 .hero-scale-option {
   border: 1px solid #e1e8ee;
-  border-radius: 12px;
-  padding: 12px 4px 9px;
+  border-radius: var(--radius-control);
+  padding: 12px 2px 9px;
   text-align: center;
   background: #fbfdfb;
 }
@@ -156,10 +158,11 @@
 .hero-scale-option small {
   display: block;
   margin-top: 5px;
-  font-size: 8.5px;
+  font-size: var(--text-caption);
   font-weight: 700;
-  color: #828c99;
+  color: var(--muted);
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 .hero-scale-option.picked {
   background: var(--blue);
@@ -176,7 +179,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: #58749d;
 }
@@ -210,7 +213,7 @@
 }
 .section-head p:not(.eyebrow) {
   color: var(--muted);
-  font-size: 15px;
+  font-size: var(--text-body);
   line-height: 1.7;
   margin: 0;
 }
@@ -223,7 +226,7 @@
 .program-grid article {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: var(--radius-card);
   padding: 24px;
   box-shadow: var(--shadow-sm);
   transition: 0.25s ease;
@@ -239,12 +242,12 @@
    its text, so "E-CAV" and "BI INDORSEMENT" both sit properly. */
 .program-code {
   display: inline-block;
-  font: 800 11.5px Manrope, sans-serif;
+  font: 800 var(--text-caption) Manrope, sans-serif;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--blue);
   background: var(--blue-soft);
-  border-radius: 11px;
+  border-radius: var(--radius-control);
   padding: 8px 12px;
   margin-bottom: 14px;
   /* A long code wraps inside the card rather than widening the column. */
@@ -253,7 +256,7 @@
 }
 .program-grid h3 {
   margin: 0;
-  font-size: 14.5px;
+  font-size: var(--text-body);
   line-height: 1.5;
   color: #2f3b53;
   font-weight: 700;
@@ -275,7 +278,7 @@
 .steps li {
   position: relative;
   padding: 26px 22px;
-  border-radius: 18px;
+  border-radius: var(--radius-card);
   background: #fbfdfb;
   border: 1px solid var(--border);
 }
@@ -284,7 +287,7 @@
   place-items: center;
   width: 42px;
   height: 42px;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--blue);
   color: #fff;
   margin-bottom: 18px;
@@ -297,17 +300,17 @@
   position: absolute;
   top: 22px;
   right: 22px;
-  font: 800 22px Manrope, sans-serif;
+  font: 800 var(--text-heading) Manrope, sans-serif;
   color: #dde8f4;
 }
 .steps h3 {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: var(--text-body);
   color: #2f3b53;
 }
 .steps p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-small);
   line-height: 1.65;
   color: var(--muted);
 }
@@ -319,7 +322,7 @@
   margin: clamp(56px, 8vw, 96px) auto;
   padding: clamp(34px, 5vw, 56px);
   background: var(--grad-brand);
-  border-radius: 26px;
+  border-radius: var(--radius-card);
   color: #fff;
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
@@ -335,7 +338,7 @@
 }
 .coa-callout p {
   color: #d0e0f1;
-  font-size: 14.5px;
+  font-size: var(--text-body);
   line-height: 1.7;
   margin: 0 0 26px;
   max-width: 460px;
@@ -351,14 +354,14 @@
   margin: 0;
   background: #fff;
   color: #323947;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   padding: 28px 26px;
   box-shadow: 0 30px 60px rgba(2, 14, 38, 0.34);
   transform: rotate(1.2deg);
 }
 .coa-preview header {
   text-align: center;
-  font: 800 12px Manrope, sans-serif;
+  font: 800 var(--text-caption) Manrope, sans-serif;
   letter-spacing: 0.16em;
   color: var(--blue);
   padding-bottom: 16px;
@@ -366,7 +369,7 @@
 }
 .coa-preview p {
   color: #4d5563;
-  font-size: 12.5px;
+  font-size: var(--text-small);
   line-height: 1.85;
   text-align: justify;
   margin: 18px 0 26px;
@@ -386,7 +389,7 @@
   margin: 0 auto 7px;
 }
 .coa-preview footer small {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: #8f97a2;
 }
 
@@ -407,7 +410,7 @@
   justify-content: center;
   gap: 8px 16px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 .footer-contact span {
   font-weight: 700;
@@ -429,11 +432,11 @@
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 700;
   color: #cfe0f5;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   padding: 9px 18px;
 }
 .footer-social:hover {

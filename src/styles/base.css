@@ -37,10 +37,32 @@
   --cream: #f5f8fc;
   --border: #dae2ec;
   --muted: #66748a;
+  /* For secondary text that can land on a tinted fill — a selected answer, a
+     summary panel — where --muted drops just under 4.5:1. 5.7:1 on white. */
+  --muted-strong: #5b6778;
   --ink: #1e2c48;
   --danger: #a44335;
   --shadow-sm: 0 4px 14px rgba(12, 32, 80, 0.07);
   --shadow: 0 24px 64px rgba(12, 32, 80, 0.13);
+
+  /* The type scale. Seven steps, and every font size in these stylesheets is
+     one of them: sizes were once picked screen by screen, 22 of them, many
+     half a pixel apart (11, 11.5, 12, 12.5) — a difference nobody sees but
+     everybody has to choose between. 12 is the floor for anything someone has
+     to read. The hero and section headings keep their clamp(), which scales
+     with the window; emoji are sized like icons and sit outside the scale. */
+  --text-caption: 12px; /* table heads, pills, hints, rating labels */
+  --text-small: 13px; /* secondary lines, form text, tables */
+  --text-body: 15px; /* reading text, large buttons */
+  --text-lead: 18px; /* the paragraph under a hero */
+  --text-heading: 22px; /* a card's, a step's or a dialog's heading */
+  --text-title: 28px; /* page titles, headline figures */
+  --text-display: 34px;
+
+  /* Three corners, one per job, where there were twenty. */
+  --radius-control: 8px; /* buttons, fields, chips, small tiles */
+  --radius-card: 14px; /* cards, panels, dialogs */
+  --radius-round: 999px; /* pills, badges, dots, avatars */
 }
 * {
   box-sizing: border-box;
@@ -74,9 +96,11 @@ h3 {
 }
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9em;
+  /* Monospace runs large, so a touch smaller than its sentence — but never
+     under the 12px floor, which 0.9em of a 12px hint was. */
+  font-size: max(0.9em, var(--text-caption));
   background: #edf2f8;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   padding: 1px 5px;
 }
 .route-fallback {
@@ -163,11 +187,11 @@ code {
   transform: translate(var(--tip-x), 3px);
   background: #16223c;
   color: #fff;
-  font: 600 11.5px/1.45 "DM Sans", system-ui, sans-serif;
+  font: 600 var(--text-caption)/1.45 "DM Sans", system-ui, sans-serif;
   letter-spacing: 0.01em;
   text-align: center;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   width: max-content;
   max-width: 232px;
   /* Typography stated, never inherited. A tip can be dropped inside anything,
@@ -281,8 +305,9 @@ code {
   text-transform: uppercase;
   letter-spacing: 0.15em;
   font-weight: 800;
-  color: #5074a9;
-  font-size: 11px;
+  /* #5074a9 at 11px read at 4.5:1 on white and under it on the cream ground. */
+  color: #3d63a0;
+  font-size: var(--text-caption);
   margin: 0 0 12px;
   display: flex;
   align-items: center;
@@ -291,10 +316,10 @@ code {
 
 .button {
   border: 0;
-  border-radius: 11px;
+  border-radius: var(--radius-control);
   padding: 12px 18px;
   font-weight: 800;
-  font-size: 13px;
+  font-size: var(--text-small);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -303,8 +328,8 @@ code {
 }
 .button.large {
   padding: 15px 24px;
-  font-size: 14px;
-  border-radius: 13px;
+  font-size: var(--text-body);
+  border-radius: var(--radius-control);
 }
 .button.primary {
   background: var(--blue);
@@ -341,17 +366,32 @@ code {
   transform: none;
 }
 
+/* The admin's row and toolbar button: Generate, Decline, Edit, Refresh, Details.
+   It was 11px text in a ~27px box. Now 12px text in a box at least 34px tall
+   with a mouse, and 44px wherever the pointer is a finger — the size those
+   actions need on a tablet, without making every table on a desktop a third
+   taller than a mouse needs. */
 .mini-button {
   border: 1px solid var(--border);
   background: #fff;
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 11px;
+  border-radius: var(--radius-control);
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  font-size: var(--text-caption);
+  line-height: 1.2;
   font-weight: 700;
   color: #505c6f;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  gap: 6px;
+}
+@media (pointer: coarse) {
+  .mini-button {
+    min-height: 44px;
+    padding: 0 14px;
+  }
 }
 .mini-button:hover:not(:disabled) {
   border-color: #a1b6cf;
@@ -370,18 +410,18 @@ code {
   background: #fff1ee;
   color: var(--danger);
   border: 1px solid #f2cfc7;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 11px 13px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   margin: 6px 0;
 }
 .notice {
   background: var(--blue-soft);
   color: #425e8b;
   border: 1px solid #c9ddf2;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 11px 13px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   margin: 6px 0;
   display: flex;
   align-items: center;
@@ -405,11 +445,11 @@ code {
   line-height: 1.25;
 }
 .brand strong {
-  font: 800 14px Manrope, sans-serif;
+  font: 800 var(--text-body) Manrope, sans-serif;
   color: var(--blue);
 }
 .brand small {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 .brand.light strong {
@@ -425,16 +465,16 @@ code {
   gap: 3px;
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   padding: 4px 8px 4px 10px;
   color: var(--muted);
 }
 .language-toggle button {
   border: 0;
   background: transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   padding: 4px 9px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 800;
   color: var(--muted);
 }
@@ -451,11 +491,17 @@ code {
 .bilingual-primary {
   line-height: 1.45;
 }
+/* The other language, under every question and answer — the fallback a reader
+   switching languages relies on. It was #8e97a3 at 11px, 2.96:1 on white, so
+   the fallback was the hardest text on the form to read. Now 12px, and
+   dark enough to hold 4.5:1 on the tinted fills below too. */
 .bilingual-secondary {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 500;
   font-style: italic;
-  color: #8e97a3;
+  /* --muted-strong, not --muted: inside a selected answer the fill is tinted
+     and --muted measured 4.1:1 there. */
+  color: var(--muted-strong);
   line-height: 1.4;
 }
 
@@ -497,13 +543,13 @@ code {
 }
 .topbar-link {
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-small);
   display: flex;
   align-items: center;
   gap: 7px;
   color: var(--blue);
   padding: 9px 13px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
 }
 .topbar-link:hover {
   background: var(--sky);
@@ -514,12 +560,14 @@ code {
 label {
   display: block;
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-small);
   margin: 0 0 20px;
   color: #343f55;
 }
+/* The required-field asterisk. #d56955 read at 3.5:1; one glyph carrying
+   "required" has to be legible on its own. */
 label b {
-  color: #d56955;
+  color: #b3261e;
 }
 input,
 select,
@@ -528,7 +576,7 @@ textarea {
   width: 100%;
   margin-top: 8px;
   border: 1px solid #d7dee6;
-  border-radius: 11px;
+  border-radius: var(--radius-control);
   padding: 13px 14px;
   background: #fff;
   color: #16223c;
@@ -547,10 +595,13 @@ select:disabled {
 }
 label small {
   display: block;
-  color: #868e97;
+  /* The muted token, not a lighter grey: #868e97 read at 3.3:1 on white, under
+     the 4.5:1 that text this size needs, and these hints are where a form
+     explains itself. */
+  color: var(--muted);
   font-weight: 400;
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   line-height: 1.5;
 }
 textarea {
@@ -575,7 +626,7 @@ textarea {
 .select-wrap.compact select {
   margin-top: 0;
   padding: 9px 34px 9px 12px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
 }
 .select-wrap.compact svg {

@@ -10,10 +10,17 @@ import {
   ShieldCheck,
   Timer,
 } from "lucide-react";
-import { Brand, LanguageToggle } from "./shared";
+import { Brand, LanguageToggle, useLanguage } from "./shared";
 import { Skeleton, Tip } from "./ui";
-import { COPY, DEFAULT_SERVICES, SQD_SCALE, t } from "../lib/csm";
+import {
+  COPY,
+  DEFAULT_SERVICES,
+  OTHER_SERVICE_CODE,
+  SQD_SCALE,
+  t,
+} from "../lib/csm";
 import { getPortalConfig } from "../lib/api";
+import { PrivacyNoticeDialog } from "./PrivacyNotice";
 import { navigate } from "../router";
 
 /** lucide dropped its brand icons, so the Facebook mark is inlined. */
@@ -80,13 +87,48 @@ const HOW_IT_WORKS = [
   },
 ];
 
+/**
+ * One program, as a way into the survey.
+ *
+ * The cards used to be a list to read: a client who found their program here
+ * still had to go back up to the button, then find the same program again on
+ * the form's second step. Each card now opens the survey with its program
+ * already chosen — carried as the program's code, which is what the office
+ * and the report call it, and nothing about the client.
+ */
+function ProgramCard({ code, language, other = false, children }) {
+  const href = `/survey?program=${encodeURIComponent(code)}`;
+  return (
+    <a
+      className={`program-card${other ? " program-other" : ""}`}
+      href={href}
+      onClick={(event) => {
+        // A modified click (new tab, new window) is the browser's to handle.
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+          return;
+        event.preventDefault();
+        navigate(href);
+      }}
+    >
+      <span className="program-code">{code}</span>
+      <h3>{children}</h3>
+      <span className="program-start">
+        {language === "tl" ? "Simulan ang survey" : "Start the survey"}
+        <ArrowRight size={15} aria-hidden="true" />
+      </span>
+    </a>
+  );
+}
+
 function Header({ language, setLanguage }) {
   return (
     <header className="landing-nav">
       <Brand />
       <nav>
+        {/* "Programs", the word the section it jumps to is headed with; this
+            said "Services" while the section said "programs". */}
         <a href="#programs">
-          {language === "tl" ? "Mga Serbisyo" : "Services"}
+          {language === "tl" ? "Mga Programa" : "Programs"}
         </a>
         <a href="#how">
           {language === "tl" ? "Paano Ito Gumagana" : "How it works"}
@@ -116,7 +158,8 @@ function Header({ language, setLanguage }) {
             className="button primary"
             onClick={() => navigate("/survey")}
           >
-            {language === "tl" ? "Sagutan ang Survey" : "Answer the survey"}
+            {/* One name for one action: the hero's button says the same. */}
+            {language === "tl" ? "Simulan ang Survey" : "Start the survey"}
             <ArrowRight size={17} />
           </button>
         </Tip>
@@ -126,7 +169,7 @@ function Header({ language, setLanguage }) {
 }
 
 export function LandingPage() {
-  const [language, setLanguage] = useState("en");
+  const [language, setLanguage] = useLanguage();
   // null until the backend answers. Three states, kept apart: an empty list
   // used to mean all of "still loading", "the office offers no main program"
   // and "the backend is down", and all three showed the seeded programs — so
@@ -134,6 +177,8 @@ export function LandingPage() {
   // under them, and a program withdrawn from that seed stayed advertised.
   const [services, setServices] = useState(null);
   const [unreachable, setUnreachable] = useState(false);
+  // A count, as on the survey: see PrivacyNoticeDialog for why not a flag.
+  const [privacyOpens, setPrivacyOpens] = useState(0);
   useEffect(() => {
     getPortalConfig()
       .then((config) =>
@@ -274,13 +319,13 @@ export function LandingPage() {
           </p>
           <h2>
             {language === "tl"
-              ? "Mga pangunahing serbisyo ng OSDS"
-              : "The OSDS main programs"}
+              ? "Piliin ang iyong programa upang magsimula"
+              : "Choose your program to begin"}
           </h2>
           <p>
             {language === "tl"
-              ? "Sinusukat ang bawat programa nang hiwalay sa CSM Summary Report. Ang ibang transaksyon ay nakalista sa ilalim ng Other Services."
-              : "Each program is measured separately in the CSM Summary Report. Anything else is recorded under Other Services."}
+              ? "Bubukas ang survey na napili na ang iyong programa. Maaari mo pa itong palitan sa form."
+              : "The survey opens with your program already selected. You can still change it in the form."}
           </p>
         </div>
         {/* No icons here. There is no icon that means "SIAP Phase 2", so they
@@ -308,23 +353,21 @@ export function LandingPage() {
                 </article>
               ))
             : programs.map((program) => (
-                <article key={program.service_id || program.code}>
-                  <span className="program-code">{program.code}</span>
-                  <h3>
-                    {language === "tl" && program.name_tl
-                      ? program.name_tl
-                      : program.name_en}
-                  </h3>
-                </article>
+                <ProgramCard
+                  key={program.service_id || program.code}
+                  code={program.code}
+                  language={language}
+                >
+                  {language === "tl" && program.name_tl
+                    ? program.name_tl
+                    : program.name_en}
+                </ProgramCard>
               ))}
-          <article className="program-other">
-            <span className="program-code">OTHER</span>
-            <h3>
-              {language === "tl"
-                ? "Iba pang serbisyo — isulat ang transaksyon sa form."
-                : "Other services — name your transaction in the form."}
-            </h3>
-          </article>
+          <ProgramCard code={OTHER_SERVICE_CODE} language={language} other>
+            {language === "tl"
+              ? "Iba pang serbisyo — isulat ang transaksyon sa form."
+              : "Other services — name your transaction in the form."}
+          </ProgramCard>
         </div>
       </section>
 
@@ -420,6 +463,32 @@ export function LandingPage() {
           <a href="tel:+63284411220">(02)8441-1220</a>
           <a href="tel:+63289880001">(02)8988-0001</a>
         </div>
+        {/* The Privacy Notice used to have one door, on the survey's last
+            step — after every answer had been typed. Someone deciding whether
+            to start can read it here first. */}
+        <nav
+          className="footer-links"
+          aria-label={language === "tl" ? "Iba pang link" : "More links"}
+        >
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={() => setPrivacyOpens((count) => count + 1)}
+          >
+            Privacy Notice
+          </button>
+          <a
+            href="/verification"
+            onClick={(event) => {
+              event.preventDefault();
+              navigate("/verification");
+            }}
+          >
+            {language === "tl"
+              ? "Beripikahin ang sertipiko"
+              : "Verify a certificate"}
+          </a>
+        </nav>
         <Tip
           text={
             language === "tl"
@@ -440,6 +509,7 @@ export function LandingPage() {
           </a>
         </Tip>
       </footer>
+      <PrivacyNoticeDialog openCount={privacyOpens} language={language} />
     </div>
   );
 }

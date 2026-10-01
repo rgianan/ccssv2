@@ -146,16 +146,46 @@ function AdminLogin({ onAuthenticated }) {
   );
 }
 
+/**
+ * The tabs, in two groups. They were one flat list of eight, in which the
+ * four opened every day and the four opened to set the office up looked the
+ * same. The id is also what the address carries (/admin#certificates).
+ */
 const TABS = [
-  { id: "overview", label: "Overview", icon: LayoutGrid },
-  { id: "responses", label: "Responses", icon: Inbox },
-  { id: "certificates", label: "Certificates", icon: FileSignature },
-  { id: "reports", label: "Reports", icon: FileSpreadsheet },
-  { id: "services", label: "Programs", icon: ListChecks },
-  { id: "settings", label: "Settings", icon: Settings2 },
-  { id: "users", label: "Users", icon: Users, superadmin: true },
-  { id: "audit", label: "Audit", icon: ClipboardList, superadmin: true },
+  { id: "overview", label: "Overview", icon: LayoutGrid, group: "work" },
+  { id: "responses", label: "Responses", icon: Inbox, group: "work" },
+  {
+    id: "certificates",
+    label: "Certificates",
+    icon: FileSignature,
+    group: "work",
+  },
+  { id: "reports", label: "Reports", icon: FileSpreadsheet, group: "work" },
+  { id: "services", label: "Programs", icon: ListChecks, group: "setup" },
+  { id: "settings", label: "Settings", icon: Settings2, group: "setup" },
+  {
+    id: "users",
+    label: "Users",
+    icon: Users,
+    group: "setup",
+    superadmin: true,
+  },
+  {
+    id: "audit",
+    label: "Audit",
+    icon: ClipboardList,
+    group: "setup",
+    superadmin: true,
+  },
 ];
+const NAV_GROUPS = [
+  { id: "work", label: "Daily work" },
+  { id: "setup", label: "Setup" },
+];
+
+/** The tabs an account may open: Users and Audit are the superadmin's. */
+export const tabsFor = (isSuperadmin) =>
+  TABS.filter((entry) => !entry.superadmin || isSuperadmin);
 
 const PAGE_COPY = {
   overview: [
@@ -364,9 +394,114 @@ function CertificateBell({ pending, unseen, onOpen, onMarkSeen }) {
   );
 }
 
+/**
+ * The open tab, kept in the address as /admin#certificates.
+ *
+ * It used to live only in this component's state, so the address never
+ * changed: a reload went back to Overview, the browser's Back button left the
+ * admin altogether, and nothing could link to a tab. As the fragment, the
+ * browser's own history does all three — and the server never sees it, so no
+ * route had to be added.
+ *
+ * The fragment is kept as typed and checked against `ids` at each render,
+ * rather than resolved once: before sign-in the role is unknown, and "#users"
+ * resolved then would have been thrown away as not allowed and Overview shown
+ * to the superadmin who had asked for Users.
+ */
+export function useTabInAddress(ids, fallback = "overview") {
+  const read = () => {
+    try {
+      return decodeURIComponent(window.location.hash.slice(1));
+    } catch {
+      return "";
+    }
+  };
+  const [fragment, setFragment] = useState(read);
+  useEffect(() => {
+    const onChange = () => setFragment(read());
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, []);
+  const tab = ids.includes(fragment) ? fragment : fallback;
+  // Through the address, so there is one way a tab opens and Back undoes it.
+  const setTab = (id) => {
+    if (id !== read()) window.location.hash = id;
+  };
+  return [tab, setTab];
+}
+
+/**
+ * The sidebar's tabs: links, in their two groups, with the number of
+ * certificates waiting on the Certificates item — it showed only on the bell,
+ * away from the thing it counts.
+ */
+export function AdminNav({ tabs, tab, pending = 0, onNavigate }) {
+  return (
+    <nav id="admin-nav" aria-label="Admin sections">
+      {NAV_GROUPS.map((group) => {
+        const entries = tabs.filter((entry) => entry.group === group.id);
+        if (!entries.length) return null;
+        return (
+          <div
+            className="nav-group"
+            key={group.id}
+            role="group"
+            aria-labelledby={`nav-group-${group.id}`}
+          >
+            <p className="nav-group-label" id={`nav-group-${group.id}`}>
+              {group.label}
+            </p>
+            {entries.map((entry) => {
+              const Icon = entry.icon;
+              const waiting = entry.id === "certificates" ? pending : 0;
+              return (
+                <Tip
+                  key={entry.id}
+                  block
+                  placement="bottom"
+                  text={PAGE_COPY[entry.id]?.[1] || entry.label}
+                >
+                  <a
+                    href={`#${entry.id}`}
+                    className={tab === entry.id ? "active" : ""}
+                    aria-current={tab === entry.id ? "page" : undefined}
+                    // The address does the navigating. This is for the tab
+                    // already open: its link changes nothing in the address,
+                    // so nothing else would close the phone menu it sits in.
+                    onClick={onNavigate}
+                  >
+                    <Icon /> <span className="nav-label">{entry.label}</span>
+                    {waiting > 0 && (
+                      <span className="nav-count">
+                        {waiting > 99 ? "99+" : waiting}
+                        <span className="visually-hidden"> waiting</span>
+                      </span>
+                    )}
+                  </a>
+                </Tip>
+              );
+            })}
+          </div>
+        );
+      })}
+      <Tip block placement="bottom" text="Open the public portal">
+        <a
+          className="nav-portal"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            navigate("/");
+          }}
+        >
+          <BarChart3 /> Client portal
+        </a>
+      </Tip>
+    </nav>
+  );
+}
+
 export function AdminDashboard() {
   const [session, setSession] = useState(readAdminSession),
-    [tab, setTab] = useState("overview"),
     [period, setPeriod] = useState(currentPeriod),
     [error, setError] = useState(""),
     // The narrow-screen menu. Below 900px the sidebar is a bar with one button;
@@ -439,6 +574,18 @@ export function AdminDashboard() {
   // Escape hides the list, and with it whichever tab had focus; focus goes back
   // to the button that opened it rather than falling to the page.
   const menuToggle = useRef(null);
+  // Declared with the other hooks, above the sign-in return: what is allowed
+  // is worked out from the session each render, signed in or not.
+  const isSuperadmin = session?.user?.role?.toLowerCase() === "superadmin";
+  const visibleTabs = tabsFor(isSuperadmin);
+  const [tab, setTab] = useTabInAddress(visibleTabs.map((entry) => entry.id));
+  // Arriving on a tab — by a link in the sidebar, the bell, Back or a typed
+  // address — puts the last tab's error and the open menu away.
+  useEffect(() => {
+    setError("");
+    setMenuOpen(false);
+  }, [tab]);
+
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (event) => {
@@ -462,8 +609,6 @@ export function AdminDashboard() {
         }}
       />
     );
-  const isSuperadmin = session.user?.role?.toLowerCase() === "superadmin";
-  const visibleTabs = TABS.filter((entry) => !entry.superadmin || isSuperadmin);
   const [heading, sub] = PAGE_COPY[tab] || PAGE_COPY.overview;
   const usesPeriod = tab === "overview" || tab === "reports";
 
@@ -486,42 +631,15 @@ export function AdminDashboard() {
           {menuOpen ? <X /> : <Menu />}
           {menuOpen ? "Close" : "Menu"}
         </button>
-        <nav id="admin-nav">
-          {visibleTabs.map((entry) => {
-            const Icon = entry.icon;
-            return (
-              <Tip
-                key={entry.id}
-                block
-                placement="bottom"
-                text={PAGE_COPY[entry.id]?.[1] || entry.label}
-              >
-                <button
-                  className={tab === entry.id ? "active" : ""}
-                  aria-current={tab === entry.id ? "page" : undefined}
-                  onClick={() => {
-                    setTab(entry.id);
-                    setError("");
-                    setMenuOpen(false);
-                  }}
-                >
-                  <Icon /> {entry.label}
-                </button>
-              </Tip>
-            );
-          })}
-          <Tip block placement="bottom" text="Open the public portal">
-            <a
-              href="/"
-              onClick={(event) => {
-                event.preventDefault();
-                navigate("/");
-              }}
-            >
-              <BarChart3 /> Client portal
-            </a>
-          </Tip>
-        </nav>
+        <AdminNav
+          tabs={visibleTabs}
+          tab={tab}
+          pending={certificates.pending.length}
+          onNavigate={() => {
+            setError("");
+            setMenuOpen(false);
+          }}
+        />
         <div className="admin-profile">
           <span>
             {(session.user?.name || session.user?.email || "A")
@@ -568,10 +686,7 @@ export function AdminDashboard() {
               pending={certificates.pending}
               unseen={certificates.unseen}
               onMarkSeen={certificates.markSeen}
-              onOpen={() => {
-                setTab("certificates");
-                setError("");
-              }}
+              onOpen={() => setTab("certificates")}
             />
           </div>
         </header>

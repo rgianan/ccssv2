@@ -1043,6 +1043,16 @@ export function ServicesPanel({ onError }) {
     setLoading(true);
     load().finally(() => setLoading(false));
   };
+  // Edit fills the form, which on a narrow screen is below the list — so it
+  // is brought into view and given the cursor rather than changing unseen.
+  const formRef = useRef(null);
+  const showForm = () =>
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      formRef.current
+        ?.querySelector("input, select, textarea")
+        ?.focus({ preventScroll: true });
+    });
 
   /**
    * Shows the change in the list before the server has confirmed it.
@@ -1093,7 +1103,109 @@ export function ServicesPanel({ onError }) {
 
   return (
     <section className="superadmin-grid">
-      <form className="panel" onSubmit={save}>
+      {/* The list first: it is what this tab is opened to check, and it used to
+          sit after a full "add" form — below it, on a narrow screen. The form
+          is beside the list on a wide screen and under it on a narrow one. */}
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Configured programs</h2>
+            <p>
+              {loading
+                ? "Loading…"
+                : failed
+                  ? "Not loaded"
+                  : `${services.length} ${services.length === 1 ? "entry" : "entries"}`}
+            </p>
+          </div>
+        </div>
+        {loading ? (
+          <SkeletonTable
+            columns={["Program", "Category", "Status", ""]}
+            rows={5}
+          />
+        ) : failed ? (
+          <LoadFailed inline what="The programs" onRetry={retry} />
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Program</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {services.map((service) => {
+                  const pending = service.service_id === pendingId;
+                  return (
+                    <tr
+                      key={service.service_id}
+                      className={pending ? "row-pending" : ""}
+                    >
+                      <td>
+                        <strong>{service.code}</strong>
+                        <small>{service.name_en}</small>
+                      </td>
+                      <td>
+                        {service.category === "main" ? "Main program" : "Other"}
+                        {service.has_fees && <small>Charges a fee</small>}
+                      </td>
+                      <td>
+                        {pending ? (
+                          <span className="status-pill pending">Saving…</span>
+                        ) : (
+                          <Tip
+                            text={
+                              service.active
+                                ? "Offered on the client form."
+                                : "Hidden from the client form. Existing responses keep it."
+                            }
+                          >
+                            <span
+                              tabIndex={0}
+                              className={`status-pill ${service.active ? "enabled" : "disabled"}`}
+                            >
+                              {service.active ? "Active" : "Hidden"}
+                            </span>
+                          </Tip>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="mini-button"
+                          disabled={pending}
+                          onClick={() => {
+                            setForm({
+                              ...service,
+                              has_fees: service.has_fees === true,
+                              sort_order: service.sort_order ?? "",
+                            });
+                            showForm();
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!services.length && (
+                  <tr>
+                    <td colSpan={4} className="empty-cell">
+                      No programs configured yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <form className="panel" onSubmit={save} ref={formRef}>
         <div className="panel-head">
           <div>
             <h2>{form.service_id ? "Edit program" : "Add a main program"}</h2>
@@ -1213,104 +1325,6 @@ export function ServicesPanel({ onError }) {
               : "Add program"}
         </button>
       </form>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <h2>Configured programs</h2>
-            <p>
-              {loading
-                ? "Loading…"
-                : failed
-                  ? "Not loaded"
-                  : `${services.length} ${services.length === 1 ? "entry" : "entries"}`}
-            </p>
-          </div>
-        </div>
-        {loading ? (
-          <SkeletonTable
-            columns={["Program", "Category", "Status", ""]}
-            rows={5}
-          />
-        ) : failed ? (
-          <LoadFailed inline what="The programs" onRetry={retry} />
-        ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Program</th>
-                  <th>Category</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {services.map((service) => {
-                  const pending = service.service_id === pendingId;
-                  return (
-                    <tr
-                      key={service.service_id}
-                      className={pending ? "row-pending" : ""}
-                    >
-                      <td>
-                        <strong>{service.code}</strong>
-                        <small>{service.name_en}</small>
-                      </td>
-                      <td>
-                        {service.category === "main" ? "Main program" : "Other"}
-                        {service.has_fees && <small>Charges a fee</small>}
-                      </td>
-                      <td>
-                        {pending ? (
-                          <span className="status-pill pending">Saving…</span>
-                        ) : (
-                          <Tip
-                            text={
-                              service.active
-                                ? "Offered on the client form."
-                                : "Hidden from the client form. Existing responses keep it."
-                            }
-                          >
-                            <span
-                              tabIndex={0}
-                              className={`status-pill ${service.active ? "enabled" : "disabled"}`}
-                            >
-                              {service.active ? "Active" : "Hidden"}
-                            </span>
-                          </Tip>
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          className="mini-button"
-                          disabled={pending}
-                          onClick={() =>
-                            setForm({
-                              ...service,
-                              has_fees: service.has_fees === true,
-                              sort_order: service.sort_order ?? "",
-                            })
-                          }
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!services.length && (
-                  <tr>
-                    <td colSpan={4} className="empty-cell">
-                      No programs configured yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
     </section>
   );
 }
@@ -1601,6 +1615,16 @@ export function UsersPanel({ onError }) {
     setLoading(true);
     load().finally(() => setLoading(false));
   };
+  // Edit fills the form, which on a narrow screen is below the list — so it
+  // is brought into view and given the cursor rather than changing unseen.
+  const formRef = useRef(null);
+  const showForm = () =>
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      formRef.current
+        ?.querySelector("input, select, textarea")
+        ?.focus({ preventScroll: true });
+    });
   // Deliberately not optimistic. Everywhere else an optimistic row that fails
   // to save is an inconvenience; here it would show an account as created,
   // or as deactivated, when it is neither — and someone would act on that.
@@ -1628,7 +1652,85 @@ export function UsersPanel({ onError }) {
   }
   return (
     <section className="superadmin-grid">
-      <form className="panel" onSubmit={save}>
+      {/* The list first: it is what this tab is opened to check, and it used to
+          sit after a full "add" form — below it, on a narrow screen. The form
+          is beside the list on a wide screen and under it on a narrow one. */}
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Administrator accounts</h2>
+            <p>
+              {loading
+                ? "Loading…"
+                : failed
+                  ? "Not loaded"
+                  : `${users.length} ${users.length === 1 ? "account" : "accounts"}`}
+            </p>
+          </div>
+        </div>
+        {loading ? (
+          <SkeletonTable
+            columns={["User", "Role", "Status", "Updated", ""]}
+            rows={4}
+          />
+        ) : failed ? (
+          <LoadFailed
+            inline
+            what="The administrator accounts"
+            onRetry={retry}
+          />
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.user_id || user.email}>
+                    <td>
+                      <strong>{user.name}</strong>
+                      <small>
+                        {user.email}
+                        <br />
+                        {user.user_id}
+                      </small>
+                    </td>
+                    <td>{user.role}</td>
+                    <td>
+                      <span
+                        className={`status-pill ${user.active ? "enabled" : "disabled"}`}
+                      >
+                        {user.active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td>{user.updated_at || user.created_at || "—"}</td>
+                    <td>
+                      <button
+                        className="mini-button"
+                        onClick={() => {
+                          setForm({ ...user, password: "" });
+                          showForm();
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <form className="panel" onSubmit={save} ref={formRef}>
         <div className="panel-head">
           <div>
             <h2>{form.user_id ? "Edit user" : "Add user"}</h2>
@@ -1703,78 +1805,6 @@ export function UsersPanel({ onError }) {
           {saving ? "Saving…" : form.user_id ? "Update user" : "Add user"}
         </button>
       </form>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <h2>Administrator accounts</h2>
-            <p>
-              {loading
-                ? "Loading…"
-                : failed
-                  ? "Not loaded"
-                  : `${users.length} ${users.length === 1 ? "account" : "accounts"}`}
-            </p>
-          </div>
-        </div>
-        {loading ? (
-          <SkeletonTable
-            columns={["User", "Role", "Status", "Updated", ""]}
-            rows={4}
-          />
-        ) : failed ? (
-          <LoadFailed
-            inline
-            what="The administrator accounts"
-            onRetry={retry}
-          />
-        ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Updated</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.user_id || user.email}>
-                    <td>
-                      <strong>{user.name}</strong>
-                      <small>
-                        {user.email}
-                        <br />
-                        {user.user_id}
-                      </small>
-                    </td>
-                    <td>{user.role}</td>
-                    <td>
-                      <span
-                        className={`status-pill ${user.active ? "enabled" : "disabled"}`}
-                      >
-                        {user.active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td>{user.updated_at || user.created_at || "—"}</td>
-                    <td>
-                      <button
-                        className="mini-button"
-                        onClick={() => setForm({ ...user, password: "" })}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
     </section>
   );
 }

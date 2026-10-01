@@ -15,6 +15,7 @@ import {
   CLIENT_TYPES,
   COPY,
   COURTESY_TITLES,
+  OTHER_SERVICE_CODE,
   REGIONS,
   SEXES,
   SQD_SCALE,
@@ -30,7 +31,13 @@ import {
   refreshPortalConfig,
   submitResponse,
 } from "../lib/api";
-import { Bilingual, Brand, LanguageToggle, TurnstileWidget } from "./shared";
+import {
+  Bilingual,
+  Brand,
+  LanguageToggle,
+  TurnstileWidget,
+  useLanguage,
+} from "./shared";
 import { Skeleton, SkeletonRegion, Tip } from "./ui";
 import {
   PRIVACY_NOTE,
@@ -104,7 +111,10 @@ const STEPS = [
   { en: "Client information", tl: "Impormasyon ng kliyente" },
   { en: "Citizen's Charter", tl: "Citizen's Charter" },
   { en: "Service Quality Dimensions", tl: "Service Quality Dimensions" },
-  { en: "Suggestions", tl: "Mga mungkahi" },
+  // Named for what the step is for. It was "Suggestions", after the one
+  // optional box on it — but it is where the summary is checked and the
+  // response is sent.
+  { en: "Review and submit", tl: "Suriin at isumite" },
 ];
 
 function ChoiceGroup({
@@ -188,9 +198,27 @@ function SqdRating({ question, value, onChange, language, invalid = false }) {
   );
 }
 
+/**
+ * "Change", on a row of the review summary. Every row says the same word, so
+ * the accessible name adds which answer it changes.
+ */
+function ChangeLink({ language, what, onClick }) {
+  const tl = language === "tl";
+  return (
+    <button
+      type="button"
+      className="link-button summary-change"
+      aria-label={`${tl ? "Baguhin" : "Change"} ${tl ? what.tl : what.en}`}
+      onClick={onClick}
+    >
+      {tl ? "Baguhin" : "Change"}
+    </button>
+  );
+}
+
 export function SurveyForm() {
-  const [language, setLanguage] = useState("en"),
-    [step, setStep] = useState(0),
+  const [language, setLanguage] = useLanguage();
+  const [step, setStep] = useState(0),
     [form, setForm] = useState(createEmptyForm),
     [services, setServices] = useState([]),
     [servicesLoaded, setServicesLoaded] = useState(false),
@@ -227,9 +255,35 @@ export function SurveyForm() {
     });
 
   useEffect(() => {
-    loadServices().catch((loadError) =>
-      setError(loadError.message || "Unable to load the survey."),
-    );
+    loadServices()
+      .then((list) => {
+        // A program card on the landing page opens the form with its program
+        // already chosen: /survey?program=E-CAV. The code is the program's own
+        // name for itself, so the link says nothing about the client. A code
+        // this office no longer offers is ignored, and an answer already made
+        // is left alone.
+        const wanted = new URLSearchParams(window.location.search)
+          .get("program")
+          ?.trim()
+          .toUpperCase();
+        if (!wanted) return;
+        const match =
+          list.find(
+            (service) => String(service.code || "").toUpperCase() === wanted,
+          ) ||
+          (wanted === OTHER_SERVICE_CODE
+            ? list.find((service) => service.category === "other")
+            : undefined);
+        if (match)
+          setForm((current) =>
+            current.serviceId
+              ? current
+              : { ...current, serviceId: match.service_id },
+          );
+      })
+      .catch((loadError) =>
+        setError(loadError.message || "Unable to load the survey."),
+      );
   }, []);
 
   const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
@@ -445,6 +499,18 @@ export function SurveyForm() {
   // would advance. Comparing against the step the click was made on makes the
   // second a no-op, instead of skipping a step and the validation with it.
   const advance = (delta) => setStep((s) => (s === step ? s + delta : s));
+
+  /**
+   * Straight to an earlier step, from the step list or a summary row's
+   * "Change". Backwards only: each step is checked as it is left through
+   * Continue, and a jump forward would carry an answer cleared on the way back
+   * past the check — to be refused at Submit, steps away from the field.
+   */
+  const goBackTo = (target) => {
+    if (target >= step) return;
+    setStep(target);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   // The submit path needs a ref rather than `busy` for the same reason: both
   // clicks read the pre-render value of the state flag.
@@ -759,7 +825,56 @@ export function SurveyForm() {
             <Sparkles size={15} /> {t(COPY.helpUs, language)}
           </p>
           <h1>{t(COPY.formTitle, language)}</h1>
-          <p>{t(COPY.intro, language)}</p>
+          {/* The welcome is for arriving. It used to stay beside all five
+              steps — and on a phone, above each of them — saying the same
+              thing; from the second step the room goes to the step list. */}
+          {step === 0 && <p>{t(COPY.intro, language)}</p>}
+          {/* The map of the form: where you are was one line and a thin bar,
+              and the only way to an earlier step was Back, pressed until it
+              got there. Steps already passed are buttons; the rest are read,
+              not pressed — see goBackTo for why only backwards. */}
+          <nav
+            className="step-list"
+            aria-label={
+              language === "tl" ? "Mga hakbang ng survey" : "Survey steps"
+            }
+          >
+            <ol>
+              {STEPS.map((entry, index) => {
+                const label = t(entry, language);
+                if (index < step)
+                  return (
+                    <li key={entry.en} className="done">
+                      <button type="button" onClick={() => goBackTo(index)}>
+                        <span className="step-dot">
+                          <Check aria-hidden="true" />
+                        </span>
+                        <span className="step-name">{label}</span>
+                        <span className="step-state">
+                          {language === "tl" ? "Tapos na" : "Done"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                const current = index === step;
+                return (
+                  <li
+                    key={entry.en}
+                    className={current ? "current" : "todo"}
+                    aria-current={current ? "step" : undefined}
+                  >
+                    <span className="step-dot">{index + 1}</span>
+                    <span className="step-name">{label}</span>
+                    {current && (
+                      <span className="step-state">
+                        {language === "tl" ? "Narito ka" : "You are here"}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
           <div className="privacy-note">
             <ShieldCheck />
             <div>
@@ -769,6 +884,18 @@ export function SurveyForm() {
                   ? "Tumatagal ito ng humigit-kumulang 3–5 minuto."
                   : "It takes about 3–5 minutes to complete."}
               </span>
+              {/* A second door to the notice: its only link was on the last
+                  step, after every answer had been typed. */}
+              <button
+                type="button"
+                className="link-button"
+                aria-haspopup="dialog"
+                onClick={() => setPrivacyOpens((count) => count + 1)}
+              >
+                {language === "tl"
+                  ? "Basahin ang Privacy Notice"
+                  : "Read the Privacy Notice"}
+              </button>
             </div>
           </div>
         </section>
@@ -1212,13 +1339,11 @@ export function SurveyForm() {
                 <div className="section-heading">
                   <span>05</span>
                   <div>
-                    <h2>
-                      {language === "tl" ? "Mga mungkahi" : "Suggestions"}
-                    </h2>
+                    <h2>{t(STEPS[4], language)}</h2>
                     <p>
                       {language === "tl"
-                        ? "Suriin ang buod, pagkatapos ay isumite ang iyong sagot."
-                        : "Review the summary, then submit your response."}
+                        ? "Magdagdag ng mungkahi kung mayroon, suriin ang buod, pagkatapos ay isumite."
+                        : "Add a suggestion if you have one, check the summary, then submit."}
                     </p>
                   </div>
                 </div>
@@ -1239,33 +1364,56 @@ export function SurveyForm() {
                 </label>
                 <div className="review-summary">
                   <h3>{language === "tl" ? "Buod" : "Summary"}</h3>
+                  {/* In the order the form asked, and each row leads back to
+                      its step: the summary used to show an answer and leave
+                      the client to work out how to reach it. */}
                   <dl>
+                    <div>
+                      <dt>Certificate of Appearance</dt>
+                      <dd>
+                        <span>
+                          {wantsCoa
+                            ? `${language === "tl" ? "Hiniling" : "Requested"} — ${form.coaTitle} ${form.coaName}`
+                            : language === "tl"
+                              ? "Hindi hiniling"
+                              : "Not requested"}
+                        </span>
+                        <ChangeLink
+                          language={language}
+                          what={{
+                            en: "the Certificate of Appearance answer",
+                            tl: "ang sagot sa Certificate of Appearance",
+                          }}
+                          onClick={() => goBackTo(0)}
+                        />
+                      </dd>
+                    </div>
                     <div>
                       <dt>
                         {language === "tl" ? "Serbisyo" : "Service availed"}
                       </dt>
                       <dd>
-                        {isOtherService
-                          ? `${form.otherService || "—"} (Other Services)`
-                          : selectedService?.name_en || "—"}
+                        <span>
+                          {isOtherService
+                            ? `${form.otherService || "—"} (Other Services)`
+                            : selectedService?.name_en || "—"}
+                        </span>
+                        <ChangeLink
+                          language={language}
+                          what={{ en: "the service", tl: "ang serbisyo" }}
+                          onClick={() => goBackTo(1)}
+                        />
                       </dd>
                     </div>
                     <div>
-                      <dt>{language === "tl" ? "Email" : "Email"}</dt>
-                      <dd>{form.email || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>
-                        {language === "tl"
-                          ? "Certificate of Appearance"
-                          : "Certificate of Appearance"}
-                      </dt>
+                      <dt>Email</dt>
                       <dd>
-                        {wantsCoa
-                          ? `${language === "tl" ? "Hiniling" : "Requested"} — ${form.coaTitle} ${form.coaName}`
-                          : language === "tl"
-                            ? "Hindi hiniling"
-                            : "Not requested"}
+                        <span>{form.email || "—"}</span>
+                        <ChangeLink
+                          language={language}
+                          what={{ en: "the email", tl: "ang email" }}
+                          onClick={() => goBackTo(1)}
+                        />
                       </dd>
                     </div>
                   </dl>

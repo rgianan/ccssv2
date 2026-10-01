@@ -24,8 +24,95 @@
   line-height: 1.75;
   max-width: 460px;
 }
+/* The map of the form, in the column beside it. */
+.step-list {
+  margin-top: 26px;
+}
+.step-list ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+/* A row is the li itself for the current and coming steps, and the button
+   inside it for a finished one — the same box either way. */
+.step-list li.current,
+.step-list li.todo,
+.step-list li.done button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+}
+.step-list li.done button {
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+.step-list li.done button:hover {
+  background: var(--blue-soft);
+}
+.step-list li.done button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.step-list li.current {
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 700;
+}
+.step-list li.todo {
+  color: var(--muted-strong);
+}
+.step-dot {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  box-sizing: border-box;
+  border-radius: var(--radius-round);
+  border: 2px solid #c3cfde;
+  background: #fff;
+  font: 800 var(--text-caption) Manrope, sans-serif;
+}
+.step-list li.current .step-dot {
+  border-color: var(--blue);
+}
+.step-list li.done .step-dot {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #fff;
+}
+.step-dot svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 3;
+}
+.step-name {
+  flex-grow: 1;
+}
+.step-state {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+.step-list li.current .step-state {
+  color: var(--blue);
+}
+
 .privacy-note {
-  margin-top: 32px;
+  margin-top: 26px;
   border-top: 1px solid var(--border);
   padding-top: 24px;
   display: flex;
@@ -55,6 +142,12 @@
   color: var(--muted);
   margin-top: 6px;
   font-weight: 500;
+}
+.privacy-note .link-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: var(--text-small);
 }
 
 .survey-card {
@@ -379,8 +472,13 @@
 }
 .review-summary dl > div {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: 150px minmax(0, 1fr);
   gap: 10px;
+  align-items: center;
+}
+.review-summary dl > div + div {
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
 }
 .review-summary dt {
   font-size: var(--text-caption);
@@ -392,6 +490,21 @@
   margin: 0;
   font-size: var(--text-small);
   color: #37435a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.review-summary dd > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.summary-change {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: var(--text-small);
 }
 
 .form-footer {
@@ -680,6 +793,15 @@ textarea[aria-invalid="true"] {
   margin: 28px 0 0;
 }
 
+/* The column holds the title, the step list and the privacy note — about
+   640px. In a window shorter than that plus the bar, a sticky column's last
+   lines sat below the fold with no way to scroll to them, so there it simply
+   scrolls with the page. */
+@media (max-height: 780px) {
+  .survey-intro {
+    position: static;
+  }
+}
 @media (max-width: 960px) {
   .survey-shell {
     grid-template-columns: 1fr;
@@ -690,7 +812,8 @@ textarea[aria-invalid="true"] {
     position: static;
     padding-top: 0;
   }
-  .privacy-note {
+  .privacy-note,
+  .step-list {
     display: none;
   }
 }

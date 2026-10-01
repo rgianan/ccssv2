@@ -143,6 +143,50 @@ export function Brand({
   );
 }
 
+const LANGUAGE_KEY = "csm-language";
+const storedLanguage = () => {
+  try {
+    return sessionStorage.getItem(LANGUAGE_KEY) === "tl" ? "tl" : "en";
+  } catch {
+    // Storage can be blocked outright; the choice then lasts as long as the
+    // page does, which the module-level copy below still covers.
+    return "en";
+  }
+};
+let chosenLanguage = storedLanguage();
+
+/**
+ * The form language, shared by every client page.
+ *
+ * Each page used to keep its own, starting from English: a client who chose
+ * Filipino on the landing page and pressed Start was handed the survey in
+ * English and had to choose again. The choice now travels with them for the
+ * visit — kept for the tab only, and saying nothing about who they are.
+ *
+ * The page's `lang` follows it too. It stayed "en" whatever was on screen, so
+ * a screen reader read the Filipino wording with English pronunciation. It is
+ * put back on the way out: the admin module is in English.
+ */
+export function useLanguage() {
+  const [language, setLanguageState] = useState(chosenLanguage);
+  const setLanguage = (next) => {
+    chosenLanguage = next === "tl" ? "tl" : "en";
+    try {
+      sessionStorage.setItem(LANGUAGE_KEY, chosenLanguage);
+    } catch {
+      /* See storedLanguage. */
+    }
+    setLanguageState(chosenLanguage);
+  };
+  useEffect(() => {
+    document.documentElement.lang = language === "tl" ? "fil" : "en";
+    return () => {
+      document.documentElement.lang = "en";
+    };
+  }, [language]);
+  return [language, setLanguage];
+}
+
 export function LanguageToggle({ language, onChange }) {
   return (
     <div className="language-toggle" role="group" aria-label="Form language">

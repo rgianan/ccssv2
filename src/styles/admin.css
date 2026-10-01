@@ -59,10 +59,46 @@
   flex-direction: column;
 }
 .admin-layout nav {
-  margin-top: 34px;
+  margin-top: 30px;
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+/* Two groups, each under its own label. */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.nav-group + .nav-group {
+  margin-top: 18px;
+}
+.nav-group-label {
+  margin: 0 0 4px;
+  padding: 0 13px;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  /* 7.9:1 on the sidebar's darkest tone. */
+  color: #a9b9d6;
+}
+.nav-label {
+  flex-grow: 1;
+}
+/* How many certificates are waiting, on the item that leads to them. */
+.nav-count {
+  flex: none;
+  min-width: 22px;
+  box-sizing: border-box;
+  padding: 2px 7px;
+  border-radius: var(--radius-round);
+  background: #fff;
+  color: var(--blue-deep);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
 }
 .admin-layout nav button,
 .admin-layout nav a {
@@ -82,13 +118,17 @@
   width: 17px;
   height: 17px;
 }
-.admin-layout nav button.active,
+.admin-layout nav a.active,
 .admin-layout nav button:hover,
 .admin-layout nav a:hover {
   background: rgba(255, 255, 255, 0.11);
   color: #fff;
 }
-.admin-layout nav a {
+.admin-layout nav a:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+.admin-layout nav a.nav-portal {
   margin-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 0 0 var(--radius-control) var(--radius-control);
@@ -1134,9 +1174,14 @@ td.numeric,
   display: grid;
   /* minmax(0, 1fr): a bare 1fr grew to fit the accounts table's 720px, and
      Programs and Users scrolled sideways on a 1280px screen. */
-  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
   gap: 18px;
   align-items: start;
+}
+/* Four or five short columns, beside a form: the 720px floor every table
+   has put the Edit button behind a sideways scroll on a 1440px screen. */
+.superadmin-grid table {
+  min-width: 480px;
 }
 .settings-grid {
   display: grid;
@@ -1247,6 +1292,35 @@ td.numeric,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* A short window, with the sidebar still at the side. Brand, two labelled
+   groups, eight tabs, the portal link and the profile come to about 650px,
+   and the sidebar is a fixed column: on a 1366x768 laptop its last row —
+   Sign out — sat below the window with no way to scroll to it. The rows
+   tighten first, and whatever still does not fit scrolls. */
+@media (max-height: 720px) and (min-width: 901px) {
+  .admin-layout > aside {
+    padding-block: 16px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .admin-layout nav {
+    margin-top: 18px;
+  }
+  .admin-layout nav a {
+    padding-block: 8px;
+  }
+  .nav-group + .nav-group {
+    margin-top: 10px;
+  }
+  .admin-layout nav a.nav-portal {
+    margin-top: 8px;
+    padding-top: 12px;
+  }
+  .admin-profile {
+    padding-top: 12px;
+  }
+}
+
 @media (max-width: 900px) {
   .admin-layout {
     display: block;

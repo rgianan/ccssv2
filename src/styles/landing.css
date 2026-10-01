@@ -1,10 +1,18 @@
 .landing {
   overflow-x: hidden;
+  /* One container for the whole page. The bar, the hero, the programs, the
+     steps and the certificate band each had their own width and padding, and
+     at 1440px their content started at 64, 137, 173 and 133px — nothing lined
+     up down the page. Every section now holds --content at most, inside
+     --gutter, so they share one left edge at every width. */
+  --content: 1160px;
+  --gutter: clamp(20px, 5vw, 40px);
+  --edge: max(var(--gutter), calc((100% - var(--content)) / 2));
 }
 
 .landing-nav {
   height: 78px;
-  padding: 0 clamp(18px, 5vw, 64px);
+  padding: 0 var(--edge);
   display: flex;
   align-items: center;
   gap: 28px;
@@ -21,6 +29,9 @@
   margin-left: 14px;
 }
 .landing-nav nav a {
+  /* A label is one line. Wrapped, "Paano Ito Gumagana" sat two lines deep in
+     a one-line bar. */
+  white-space: nowrap;
   padding: 9px 13px;
   border-radius: var(--radius-control);
   font-size: var(--text-small);
@@ -42,9 +53,9 @@
 
 .hero {
   position: relative;
-  max-width: 1280px;
+  max-width: calc(var(--content) + 2 * var(--gutter));
   margin: auto;
-  padding: clamp(48px, 7vw, 92px) clamp(20px, 5vw, 64px) clamp(40px, 6vw, 76px);
+  padding: clamp(48px, 7vw, 92px) var(--gutter) clamp(40px, 6vw, 76px);
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
   gap: clamp(32px, 5vw, 72px);
@@ -187,9 +198,9 @@
 /* -------------------------------- Sections ------------------------------- */
 
 .section {
-  max-width: 1160px;
+  max-width: calc(var(--content) + 2 * var(--gutter));
   margin: auto;
-  padding: clamp(56px, 8vw, 96px) clamp(20px, 5vw, 40px);
+  padding: clamp(56px, 8vw, 96px) var(--gutter);
 }
 .section.alt {
   max-width: none;
@@ -199,7 +210,7 @@
   margin-top: 40px;
 }
 .section.alt > * {
-  max-width: 1160px;
+  max-width: var(--content);
   margin-inline: auto;
 }
 .section-head {
@@ -223,7 +234,8 @@
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 18px;
 }
-.program-grid article {
+.program-grid article,
+.program-card {
   background: #fff;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -231,9 +243,43 @@
   box-shadow: var(--shadow-sm);
   transition: 0.25s ease;
 }
-.program-grid article:hover {
+/* A card is a link into the survey: the name fills the middle, and the
+   "Start the survey" line sits on the bottom edge whatever the name's length,
+   so the row of cards ends on one line. */
+.program-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  color: inherit;
+  text-decoration: none;
+}
+.program-card h3 {
+  flex-grow: 1;
+}
+.program-card:hover {
   transform: translateY(-3px);
-  border-color: #b8cde4;
+  border-color: var(--blue);
+}
+.program-card:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+.program-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--blue);
+}
+.program-card:hover .program-start {
+  text-decoration: underline;
+}
+@media (prefers-reduced-motion: reduce) {
+  .program-card:hover {
+    transform: none;
+  }
 }
 /* The soft blue block the icon used to sit in, now carrying the program code.
    Keeping the block keeps the grid's rhythm — every card still opens with a
@@ -318,7 +364,10 @@
 /* ------------------------------ COA callout ------------------------------ */
 
 .coa-callout {
-  max-width: 1160px;
+  /* The band's edges on the container's, with the gutter kept at widths
+     narrower than it — a bare max-width ran it to the window's edges. */
+  width: min(var(--content), 100% - 2 * var(--gutter));
+  box-sizing: border-box;
   margin: clamp(56px, 8vw, 96px) auto;
   padding: clamp(34px, 5vw, 56px);
   background: var(--grad-brand);
@@ -428,6 +477,43 @@
   border-bottom-color: rgba(255, 255, 255, 0.6);
 }
 
+/* The site's other doors: the Privacy Notice and certificate verification. */
+.footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 24px;
+  flex-wrap: wrap;
+}
+.footer-links a,
+.footer-links button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: #dfeaf7;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.35);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.footer-links a:hover,
+.footer-links button:hover {
+  color: #fff;
+  text-decoration-color: #fff;
+}
+.footer-links a:focus-visible,
+.footer-links button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+  border-radius: var(--radius-control);
+}
+
 .footer-social {
   display: inline-flex;
   align-items: center;
@@ -445,6 +531,14 @@
   background: rgba(255, 255, 255, 0.07);
 }
 
+/* The Filipino labels are longer: between 961 and 1100px the three links
+   need about 405px of the 330 the bar has left. The sections they jump to
+   are a scroll away, so the links give way rather than the bar's controls. */
+@media (max-width: 1100px) {
+  :lang(fil) .landing-nav nav {
+    display: none;
+  }
+}
 @media (max-width: 960px) {
   .hero,
   .coa-callout {

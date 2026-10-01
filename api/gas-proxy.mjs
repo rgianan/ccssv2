@@ -46,6 +46,80 @@ const replayScopeFor = (payload) =>
     ? `submission:${String(payload.payload.submissionId).slice(0, 64)}`
     : `nonce:${randomUUID()}`;
 
+/**
+ * What to tell the browser when the web app answers with something that is
+ * not JSON — which is never this project's code speaking: doPost() returns
+ * JSON for every outcome, errors included, so anything else is one of
+ * Google's own pages, served before or instead of running the script.
+ *
+ * The old message named one cause ("deployed as Execute as me, accessible to
+ * Anyone") for all of them, and sent the office to check a setting that was
+ * usually fine. Each page Google serves has a different remedy, so each gets
+ * its own sentence. Returns `{ message, detail }`: the message is safe for any
+ * visitor, the detail — status, title and the start of the page — goes to the
+ * function log only, since a public survey submission sees these errors too.
+ */
+const explainNonJson = (status, text) => {
+  const body = String(text || "");
+  const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(body)?.[1] || "").trim();
+  const visible = body
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const has = (pattern) => pattern.test(visible) || pattern.test(title);
+  const detail = `HTTP ${status}; title "${title}"; ${visible.slice(0, 400)}`;
+
+  let message;
+  if (!body.trim())
+    message = `Apps Script returned an empty reply (HTTP ${status}). Try again; if it keeps happening, open the Apps Script project's Executions page for the failed run.`;
+  else if (
+    has(/accounts\.google\.com|sign in/i) ||
+    /ServiceLogin|accounts\.google\.com/.test(body)
+  )
+    message =
+      'Apps Script asked for a Google sign-in instead of answering. In Apps Script, open Deploy > Manage deployments and set the web app to Execute as "Me" and Who has access "Anyone".';
+  else if (
+    has(/authori[sz]ation (is )?(required|needed)|needs? (your )?permission/i)
+  )
+    message =
+      "The Apps Script project needs to be authorized again. Open it in the script editor as its owner, run any function (setupCsmSheets, for one), accept the permissions prompt, then try again.";
+  else if (has(/script function not found/i))
+    message =
+      "The deployed Apps Script version has no doPost. Open Deploy > Manage deployments, edit the web app and choose a new version of the current code.";
+  else if (
+    status === 404 ||
+    has(
+      /unable to open the file|page not found|requested url was not found|file does not exist/i,
+    )
+  )
+    message =
+      "The Apps Script web app was not found at the configured address. Check GAS_WEB_APP_URL in Vercel against the web app URL under Deploy > Manage deployments (it ends in /exec), then redeploy.";
+  else if (has(/exceeded maximum execution time/i))
+    message =
+      "Apps Script ran out of time on this request. Try again; for a report, try a shorter period.";
+  else if (
+    status === 429 ||
+    has(/too many (times|requests|simultaneous)|rate limit|quota/i)
+  )
+    message =
+      "Google is limiting requests to the Apps Script project right now (a quota or rate limit). Wait a few minutes and try again.";
+  else if (has(/(Syntax|Reference|Type|Range)Error/))
+    message =
+      "The Apps Script project failed to start because of an error in its code. Open the script editor, check that Code.gs, Certificate.gs and Report.gs are each pasted once and in full, save, and deploy a new version.";
+  else if (
+    status >= 500 ||
+    has(
+      /server error occurred|currently unavailable|try again later|temporarily/i,
+    )
+  )
+    message = `Google's Apps Script service returned an error (HTTP ${status}). This is usually temporary — try again in a minute.`;
+  else
+    message = `Apps Script returned a page instead of data (HTTP ${status}${title ? `, "${title.slice(0, 60)}"` : ""}). Check the web app deployment under Deploy > Manage deployments.`;
+  return { message, detail };
+};
+
 function readBody(req) {
   if (typeof req.body === "string") return Promise.resolve(req.body);
   if (req.body && typeof req.body === "object")
@@ -245,9 +319,13 @@ export default async function handler(req, res) {
     try {
       JSON.parse(responseText);
     } catch {
-      throw new Error(
-        "Apps Script did not return JSON. Confirm the web app is deployed as Execute as me and accessible to Anyone.",
+      const { message, detail } = explainNonJson(upstream.status, responseText);
+      // The page itself, for whoever reads the function log: the browser gets
+      // the remedy, not Google's markup.
+      console.error(
+        `Apps Script non-JSON reply to "${String(payload.action || "").slice(0, 60)}": ${detail}`,
       );
+      return send(res, 502, { ok: false, error: message });
     }
     res.writeHead(upstream.ok ? 200 : 502, SECURITY_HEADERS);
     res.end(responseText);
@@ -261,4 +339,4 @@ export default async function handler(req, res) {
 
 /* Named alongside the default export so tests exercise this module rather than
    a copy of it. Vercel invokes the default export and ignores these. */
-export { idempotencyKey, replayScopeFor };
+export { explainNonJson, idempotencyKey, replayScopeFor };

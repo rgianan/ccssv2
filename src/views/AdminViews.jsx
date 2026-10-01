@@ -33,6 +33,7 @@ import {
 import { Brand, TurnstileWidget } from "./shared";
 import {
   PanelBoundary,
+  LoadFailed,
   Skeleton,
   SkeletonLines,
   SkeletonRegion,
@@ -389,6 +390,9 @@ export function AdminDashboard() {
   // once when the proxy's token was misconfigured — which signing out cannot
   // fix and whose message the login screen then hid.
   const handleError = (thrown) => {
+    // No error: a panel that failed to load has loaded on a retry, and the
+    // banner about the failed attempt comes down with it.
+    if (!thrown) return setError("");
     const message = thrown?.message || "Something went wrong.";
     setError(message);
     if (/authorization required|session has expired/i.test(message))
@@ -676,16 +680,27 @@ function OverviewSkeleton() {
 
 function OverviewPanel({ period, onError }) {
   const [data, setData] = useState(null),
-    [loading, setLoading] = useState(true);
+    [loading, setLoading] = useState(true),
+    [failed, setFailed] = useState(false),
+    [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let stale = false;
     setLoading(true);
     getAdminOverview(period)
       .then((result) => {
-        if (!stale) setData(result);
+        if (stale) return;
+        setData(result);
+        if (failed) onError(null);
+        setFailed(false);
       })
       .catch((thrown) => {
-        if (!stale) onError(thrown);
+        if (stale) return;
+        // The figures on screen are the previous period's. Kept, they stood
+        // under this period's label as its own; with none, the cards read 0
+        // responses and "No data" as though that had been counted.
+        setData(null);
+        setFailed(true);
+        onError(thrown);
       })
       .finally(() => {
         if (!stale) setLoading(false);
@@ -693,9 +708,16 @@ function OverviewPanel({ period, onError }) {
     return () => {
       stale = true;
     };
-  }, [period.type, period.year, period.quarter]);
+  }, [period.type, period.year, period.quarter, attempt]);
 
   if (loading && !data) return <OverviewSkeleton />;
+  if (failed)
+    return (
+      <LoadFailed
+        what={`The overview for ${describePeriod(period)}`}
+        onRetry={() => setAttempt((count) => count + 1)}
+      />
+    );
   const overall = data?.overall || 0;
   const maxServiceScore = 5;
 
@@ -1050,6 +1072,7 @@ function ResponsesPanel({ onError }) {
     [notice, setNotice] = useState(""),
     [reclassifying, setReclassifying] = useState(""),
     [reload, setReload] = useState(0),
+    [failed, setFailed] = useState(false),
     [expanded, setExpanded] = useState("");
 
   // The sheet is the source of truth for both filtering and paging, so the
@@ -1060,13 +1083,21 @@ function ResponsesPanel({ onError }) {
     setLoading(true);
     getAdminResponses({ query, offset, limit: PAGE_SIZE })
       .then((result) => {
-        if (!stale) setData(result);
+        if (stale) return;
+        setData(result);
+        if (failed) onError(null);
+        setFailed(false);
       })
       .catch((thrown) => {
         // A superseded request must not raise a banner — or, since
         // handleError signs out on authorization-shaped messages, drop the
         // administrator to the login screen mid-navigation.
-        if (!stale) onError(thrown);
+        if (stale) return;
+        // The rows on screen answer the search or page before this one; under
+        // "Matching responses" they read as what the new search found.
+        setData({ rows: [], total: 0, offset: 0 });
+        setFailed(true);
+        onError(thrown);
       })
       .finally(() => {
         if (!stale) setLoading(false);
@@ -1117,6 +1148,13 @@ function ResponsesPanel({ onError }) {
           rows={Math.min(PAGE_SIZE, 8)}
         />
       </SkeletonRegion>
+    );
+  if (failed)
+    return (
+      <LoadFailed
+        what={query ? "The search results" : "The responses"}
+        onRetry={() => setReload((value) => value + 1)}
+      />
     );
   return (
     // The refreshing treatment goes on the results below, never on this

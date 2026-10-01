@@ -38,6 +38,7 @@ import {
 import { COURTESY_TITLES, OTHER_SERVICE_CODE, portalToday } from "../lib/csm";
 import { describePeriod } from "./PeriodPicker";
 import {
+  LoadFailed,
   Skeleton,
   SkeletonLines,
   SkeletonRegion,
@@ -135,7 +136,8 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
     [declining, setDeclining] = useState(null),
     [busyId, setBusyId] = useState(""),
     [notice, setNotice] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [failed, setFailed] = useState(false);
 
   // Tracks the filter a response belongs to, so switching tabs quickly cannot
   // leave the slower request's rows sitting under the newer tab.
@@ -145,10 +147,18 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
     setLoading(true);
     return getCoaRequests({ status: nextStatus }, { fresh })
       .then((result) => {
-        if (wanted.current === nextStatus) setRows(result);
+        if (wanted.current !== nextStatus) return;
+        setRows(result);
+        if (failed) onError(null);
+        setFailed(false);
       })
       .catch((thrown) => {
-        if (wanted.current === nextStatus) onError(thrown);
+        if (wanted.current !== nextStatus) return;
+        // The rows on screen are the previous filter's; under this one they
+        // would be requests listed with a status they do not have.
+        setRows([]);
+        setFailed(true);
+        onError(thrown);
       })
       .finally(() => {
         if (wanted.current === nextStatus) setLoading(false);
@@ -327,6 +337,8 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
         >
           <SkeletonTable columns={COA_COLUMNS} rows={5} />
         </SkeletonRegion>
+      ) : failed ? (
+        <LoadFailed what="The certificate requests" onRetry={() => load()} />
       ) : (
         <div className={`table-card${loading ? " is-refreshing" : ""}`}>
           <div className="table-scroll">
@@ -685,7 +697,9 @@ export function ReportsPanel({ period, onError }) {
     [saving, setSaving] = useState(false),
     [generating, setGenerating] = useState(false),
     [notice, setNotice] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [failed, setFailed] = useState(false),
+    [attempt, setAttempt] = useState(0);
 
   // Guarded: switching period twice quickly must not let the abandoned request
   // overwrite the current one, nor raise an error for results already gone.
@@ -698,9 +712,18 @@ export function ReportsPanel({ period, onError }) {
         if (stale) return;
         setStats(serviceStats);
         setReports(generated);
+        if (failed) onError(null);
+        setFailed(false);
       })
       .catch((thrown) => {
-        if (!stale) onError(thrown);
+        if (stale) return;
+        // The rows on screen belong to the period that was showing before.
+        // Left in place they sat under the new period's heading, and Save
+        // counts or Generate report wrote them to it — one quarter's clients
+        // and transactions filed as another's.
+        setStats([]);
+        setFailed(true);
+        onError(thrown);
       })
       .finally(() => {
         if (!stale) setLoading(false);
@@ -708,7 +731,7 @@ export function ReportsPanel({ period, onError }) {
     return () => {
       stale = true;
     };
-  }, [period.type, period.year, period.quarter]);
+  }, [period.type, period.year, period.quarter, attempt]);
 
   const updateStat = (serviceId, key, value) =>
     setStats((rows) =>
@@ -785,6 +808,14 @@ export function ReportsPanel({ period, onError }) {
           />
         </article>
       </SkeletonRegion>
+    );
+
+  if (failed)
+    return (
+      <LoadFailed
+        what={`The counts for ${describePeriod(period)}`}
+        onRetry={() => setAttempt((count) => count + 1)}
+      />
     );
 
   return (
@@ -991,12 +1022,27 @@ export function ServicesPanel({ onError }) {
     [saving, setSaving] = useState(false),
     [pendingId, setPendingId] = useState(""),
     [notice, setNotice] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [failed, setFailed] = useState(false);
 
-  const load = () => getAdminServices().then(setServices).catch(onError);
+  const load = () =>
+    getAdminServices()
+      .then((list) => {
+        setServices(list);
+        if (failed) onError(null);
+        setFailed(false);
+      })
+      .catch((thrown) => {
+        setFailed(true);
+        onError(thrown);
+      });
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, []);
+  const retry = () => {
+    setLoading(true);
+    load().finally(() => setLoading(false));
+  };
 
   /**
    * Shows the change in the list before the server has confirmed it.
@@ -1175,7 +1221,9 @@ export function ServicesPanel({ onError }) {
             <p>
               {loading
                 ? "Loading…"
-                : `${services.length} ${services.length === 1 ? "entry" : "entries"}`}
+                : failed
+                  ? "Not loaded"
+                  : `${services.length} ${services.length === 1 ? "entry" : "entries"}`}
             </p>
           </div>
         </div>
@@ -1184,6 +1232,8 @@ export function ServicesPanel({ onError }) {
             columns={["Program", "Category", "Status", ""]}
             rows={5}
           />
+        ) : failed ? (
+          <LoadFailed inline what="The programs" onRetry={retry} />
         ) : (
           <div className="table-scroll">
             <table>
@@ -1294,14 +1344,26 @@ export function SettingsPanel({ onError, canSign = false }) {
     [saving, setSaving] = useState(false),
     [uploading, setUploading] = useState(""),
     [notice, setNotice] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [failed, setFailed] = useState(false),
+    [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    setLoading(true);
     getAdminSettings()
-      .then(setSettings)
-      .catch(onError)
+      .then((stored) => {
+        setSettings(stored);
+        if (failed) onError(null);
+        setFailed(false);
+      })
+      .catch((thrown) => {
+        // Not a blank form: every field empty with Save beside it reads as
+        // the office's settings having been wiped.
+        setFailed(true);
+        onError(thrown);
+      })
       .finally(() => setLoading(false));
-  }, []);
+  }, [attempt]);
 
   async function save(event) {
     event.preventDefault();
@@ -1395,6 +1457,14 @@ export function SettingsPanel({ onError, canSign = false }) {
           <SkeletonLines lines={3} />
         </article>
       </SkeletonRegion>
+    );
+
+  if (failed)
+    return (
+      <LoadFailed
+        what="The office settings"
+        onRetry={() => setAttempt((count) => count + 1)}
+      />
     );
 
   return (
@@ -1511,11 +1581,26 @@ export function UsersPanel({ onError }) {
     [form, setForm] = useState(blankUser),
     [saving, setSaving] = useState(false),
     [notice, setNotice] = useState(""),
-    [error, setError] = useState("");
-  const load = () => getAdminUsers().then(setUsers).catch(onError);
+    [error, setError] = useState(""),
+    [failed, setFailed] = useState(false);
+  const load = () =>
+    getAdminUsers()
+      .then((list) => {
+        setUsers(list);
+        if (failed) onError(null);
+        setFailed(false);
+      })
+      .catch((thrown) => {
+        setFailed(true);
+        onError(thrown);
+      });
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, []);
+  const retry = () => {
+    setLoading(true);
+    load().finally(() => setLoading(false));
+  };
   // Deliberately not optimistic. Everywhere else an optimistic row that fails
   // to save is an inconvenience; here it would show an account as created,
   // or as deactivated, when it is neither — and someone would act on that.
@@ -1626,7 +1711,9 @@ export function UsersPanel({ onError }) {
             <p>
               {loading
                 ? "Loading…"
-                : `${users.length} ${users.length === 1 ? "account" : "accounts"}`}
+                : failed
+                  ? "Not loaded"
+                  : `${users.length} ${users.length === 1 ? "account" : "accounts"}`}
             </p>
           </div>
         </div>
@@ -1634,6 +1721,12 @@ export function UsersPanel({ onError }) {
           <SkeletonTable
             columns={["User", "Role", "Status", "Updated", ""]}
             rows={4}
+          />
+        ) : failed ? (
+          <LoadFailed
+            inline
+            what="The administrator accounts"
+            onRetry={retry}
           />
         ) : (
           <div className="table-scroll">
@@ -1719,12 +1812,20 @@ export function AuditPanel({ onError }) {
       query: "",
       limit: 200,
     }),
-    [loading, setLoading] = useState(true);
+    [loading, setLoading] = useState(true),
+    [failed, setFailed] = useState(false);
   const load = async (nextFilters = filters) => {
     setLoading(true);
     try {
       setData(await getAdminAuditLog(nextFilters));
+      if (failed) onError(null);
+      setFailed(false);
     } catch (loadError) {
+      // Not the previous filter's entries under this one, and not an empty
+      // log: with nothing loaded the heading read "0 matching records · chain
+      // integrity warning", a verdict on a chain nobody had checked.
+      setData(null);
+      setFailed(true);
       onError(loadError);
     } finally {
       setLoading(false);
@@ -1745,6 +1846,8 @@ export function AuditPanel({ onError }) {
     setFilters(next);
     if (key !== "query") load(next);
   };
+  if (failed && !loading)
+    return <LoadFailed what="The audit log" onRetry={() => load()} />;
   return (
     <section className="stacked">
       <section className="stats">
@@ -1774,16 +1877,23 @@ export function AuditPanel({ onError }) {
         <div className="table-tools">
           <div>
             <h2>Administrator audit trail</h2>
-            <p>
-              {data?.total || 0} matching records · chain integrity{" "}
-              <b
-                className={
-                  data?.integrity?.valid ? "integrity-good" : "integrity-bad"
-                }
-              >
-                {data?.integrity?.valid ? "verified" : "warning"}
-              </b>
-            </p>
+            {/* No verdict until there is a log to give one on: this read
+                "chain integrity warning" for as long as the first load took,
+                every time the tab was opened. */}
+            {data ? (
+              <p>
+                {data.total || 0} matching records · chain integrity{" "}
+                <b
+                  className={
+                    data.integrity?.valid ? "integrity-good" : "integrity-bad"
+                  }
+                >
+                  {data.integrity?.valid ? "verified" : "warning"}
+                </b>
+              </p>
+            ) : (
+              <p>Loading the audit trail…</p>
+            )}
           </div>
           <div className="audit-filters">
             <select

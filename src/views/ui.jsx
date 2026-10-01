@@ -95,6 +95,35 @@ export function SkeletonTable({ columns, rows = 6 }) {
 }
 
 /**
+ * In place of a panel whose data did not arrive.
+ *
+ * A failed load used to render as the panel's ordinary state with whatever it
+ * already held: "No programs configured yet", an audit log reading "0 records ·
+ * chain integrity warning", a blank settings form with Save enabled — and, on
+ * Reports, the previous period's counts under the new period's heading, where
+ * Save wrote them to the wrong period. Nothing a panel has not loaded is shown
+ * as though it had been, and nothing that writes is offered beside it.
+ *
+ * The reason is the banner the dashboard already raises; this says what did
+ * not load and offers the retry. `inline` is for a list inside a card that
+ * stays on screen, where a second card would be a box in a box.
+ */
+export function LoadFailed({ what, onRetry, inline = false }) {
+  const Box = inline ? "div" : "article";
+  return (
+    <Box className={inline ? "load-failed" : "panel load-failed"}>
+      <h2>{what} could not be loaded</h2>
+      <p>
+        The reason is shown at the top of the page. Nothing has been changed.
+      </p>
+      <button type="button" className="button secondary" onClick={onRetry}>
+        Try again
+      </button>
+    </Box>
+  );
+}
+
+/**
  * Keeps one panel's render error inside that panel.
  *
  * React unmounts the whole tree when a render throws, so a single unexpected

@@ -697,6 +697,23 @@ td small {
   max-width: 320px;
   white-space: normal;
 }
+/* A panel whose data did not load: what it was, and the way to ask again. */
+.load-failed {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 28px;
+}
+.load-failed h2 {
+  margin: 0;
+  font: 800 var(--text-body) Manrope, sans-serif;
+  color: var(--ink);
+}
+.load-failed p {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: var(--text-small);
+}
 .empty-cell {
   text-align: center;
   color: var(--muted);

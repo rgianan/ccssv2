@@ -100,7 +100,7 @@
 }
 .verification-result dl > div {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: 150px minmax(0, 1fr);
   gap: 10px;
 }
 .verification-result dt {
@@ -129,7 +129,7 @@
     padding: 22px 18px;
   }
   .verification-result dl > div {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }
 }

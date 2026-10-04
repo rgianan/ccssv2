@@ -326,6 +326,16 @@ code {
   gap: 8px;
   white-space: nowrap;
 }
+/* On a small phone a label wider than its column wraps rather than widening
+   the column past the screen: "Request it through the survey" alone was 292px
+   in a 252px band. */
+@media (max-width: 480px) {
+  .button {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+}
 .button.large {
   padding: 15px 24px;
   font-size: var(--text-body);

@@ -57,7 +57,7 @@
   margin: auto;
   padding: clamp(48px, 7vw, 92px) var(--gutter) clamp(40px, 6vw, 76px);
   display: grid;
-  grid-template-columns: 1.05fr 0.95fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: clamp(32px, 5vw, 72px);
   align-items: center;
 }
@@ -374,7 +374,7 @@
   border-radius: var(--radius-card);
   color: #fff;
   display: grid;
-  grid-template-columns: 1.05fr 0.95fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: clamp(28px, 4vw, 56px);
   align-items: center;
 }
@@ -542,7 +542,10 @@
 @media (max-width: 960px) {
   .hero,
   .coa-callout {
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr), not 1fr: on a 360px phone the band's one column was
+       292px — the width of its button, which does not wrap — inside 252px of
+       band, and the sentence above it ran 6px off the band's edge. */
+    grid-template-columns: minmax(0, 1fr);
   }
   .hero-card,
   .coa-preview {
@@ -553,6 +556,11 @@
   }
 }
 @media (max-width: 620px) {
+  /* Justified in a column this narrow, the sample opened gaps a word wide
+     between words. */
+  .coa-preview p {
+    text-align: left;
+  }
   .landing-nav .button.primary {
     display: none;
   }

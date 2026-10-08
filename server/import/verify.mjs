@@ -1,5 +1,4 @@
 import { randomBytes, createHash } from "node:crypto";
-import { officeMinute } from "../dates.mjs";
 import { handleRequest } from "../dispatch.mjs";
 import { CC_KEYS, SQD_KEYS } from "../records.mjs";
 import { appsScript } from "../test/apps-script.mjs";
@@ -76,10 +75,6 @@ function differences(
   return found;
 }
 
-/** "Sun Sep 20 2026 15:05:00 GMT+0800 (…)": a Date that Sheets made of text. */
-const LONG_DATE =
-  /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/;
-
 export async function verifyImport({
   db,
   data,
@@ -89,7 +84,6 @@ export async function verifyImport({
   // The rows each known difference touched, so a row seen on several pages
   // or filters is counted once.
   const known = {
-    longIssueTimes: new Set(),
     blankAnswers: new Set(),
     invalidAges: new Set(),
   };
@@ -139,14 +133,6 @@ export async function verifyImport({
     if (copy.sex === "N/A") copy.sex = "";
     return copy;
   };
-  const alignIssueTime = (value, id) => {
-    if (typeof value === "string" && LONG_DATE.test(value)) {
-      known.longIssueTimes.add(id);
-      return officeMinute(new Date(value));
-    }
-    return value;
-  };
-
   const results = [];
   const compare = (check, expected, actual) => {
     const found = differences(expected, actual);
@@ -285,10 +271,7 @@ export async function verifyImport({
       ])
         compare(
           `Certificates${status ? ` (${status.toLowerCase()})` : ""}`,
-          gasAsk("adminGetCoaRequests(__a, 't')", { status }).map((c) => ({
-            ...c,
-            coaIssuedAt: alignIssueTime(c.coaIssuedAt, c.verificationCode),
-          })),
+          gasAsk("adminGetCoaRequests(__a, 't')", { status }),
           await ask("adminGetCoaRequests", { filters: { status } }),
         );
 
@@ -299,11 +282,7 @@ export async function verifyImport({
         actualChecks = [];
       for (const { verification_code: code } of codes) {
         const theirs = gas.call("verifyCertificate(__c)", { __c: code });
-        expectedChecks.push(
-          theirs.valid
-            ? { ...theirs, issuedAt: alignIssueTime(theirs.issuedAt, code) }
-            : theirs,
-        );
+        expectedChecks.push(theirs);
         actualChecks.push(await ask("verifyCertificate", { code }));
       }
       compare(

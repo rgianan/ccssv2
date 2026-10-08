@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { database } from "./db.mjs";
-import { loadImport } from "./import/load.mjs";
+import { catchUpImport, loadImport } from "./import/load.mjs";
 import { printProblems, readExportFile } from "./import/report.mjs";
 import { transformExport } from "./import/transform.mjs";
 
@@ -14,6 +14,9 @@ import { transformExport } from "./import/transform.mjs";
  *   npm run db:import -- .import/export.json --apply --replace
  *     Clears the portal's tables first — for a rehearsal's database, or the
  *     final import at cutover.
+ *   npm run db:import -- .import/late.json --catch-up [--apply]
+ *     After the switch: adds only the responses Apps Script took after the
+ *     final import. Nothing else is touched.
  *
  * Set AUDIT_HASH_SECRET (from the Apps Script project's script properties)
  * to have the audit chain checked on the way in. Then run npm run db:verify.
@@ -24,6 +27,7 @@ const { values: options, positionals } = parseArgs({
   options: {
     apply: { type: "boolean", default: false },
     replace: { type: "boolean", default: false },
+    "catch-up": { type: "boolean", default: false },
   },
 });
 
@@ -55,7 +59,45 @@ try {
   printProblems(out.problems);
   const errors = out.problems.filter((p) => p.level === "error").length;
 
-  if (!options.apply) {
+  if (options["catch-up"]) {
+    if (errors && options.apply) {
+      console.log(
+        "\nNot loaded: correct the errors above in the sheet and export again.",
+      );
+      process.exitCode = 1;
+    } else {
+      const db = database();
+      try {
+        const result = await catchUpImport(db, t, { apply: options.apply });
+        const list = (refs) =>
+          refs.length
+            ? `${refs.length} (${refs.slice(0, 10).join(", ")}${refs.length > 10 ? ", …" : ""})`
+            : "none";
+        console.log(
+          `\n${options.apply ? "Added" : "Would add"}: ${list(result.added)}`,
+        );
+        console.log(
+          `Already in the new backend under the same submission id, skipped: ${list(result.skippedAsDuplicates)}`,
+        );
+        if (result.clashingCodes.length)
+          console.log(
+            `Not added, their verification code is taken: ${list(result.clashingCodes)}`,
+          );
+        if (result.programsAdded.length)
+          console.log(
+            `Programs added for them: ${result.programsAdded.join(", ")}`,
+          );
+        if (result.auditEntriesLeftInSheet)
+          console.log(
+            `${result.auditEntriesLeftInSheet} audit entries were made in Apps Script after the import; they stay in the archived sheet.`,
+          );
+        if (!options.apply)
+          console.log("\nDry run only. Add --apply to add them.");
+      } finally {
+        await db.end();
+      }
+    }
+  } else if (!options.apply) {
     console.log(
       errors
         ? "\nDry run only. Correct the errors in the sheet, export again, then run with --apply."

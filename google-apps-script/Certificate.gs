@@ -509,7 +509,8 @@ function issueCoa_(responseId, issueKey, outputFolder, expectedStatus) {
     writeResponseCells_(found.sheet, found.header, record.rowIndex, {
       coastatus: 'ISSUED',
       coalink: certificateUrl,
-      coaissuedat: Utilities.formatDate(issuedOn, timezone_(), 'yyyy-MM-dd HH:mm'),
+      // The apostrophe keeps it text; Sheets otherwise stores a date (see issuedAtText_).
+      coaissuedat: "'" + Utilities.formatDate(issuedOn, timezone_(), 'yyyy-MM-dd HH:mm'),
       coaissuekey: issueKey,
       coaissueddetails: JSON.stringify(printed),
       verificationcode: verificationCode,

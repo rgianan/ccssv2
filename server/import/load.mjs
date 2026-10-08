@@ -210,3 +210,95 @@ export async function loadImport(db, tables, { replace = false } = {}) {
     return { replaced: occupied ? before : null, loaded: await counts(tx) };
   });
 }
+
+/**
+ * The cutover's second pass. Between the final export and the switch, Apps
+ * Script may still take a few submissions; a second export carries them, and
+ * this adds the responses the database does not have yet — nothing else.
+ *
+ * A form that reached both backends (a browser retry landing either side of
+ * the switch) is already here under its submission id, and is skipped. The
+ * audit log is left alone: the new backend's chain has moved on, and the
+ * sheet keeps whatever Apps Script recorded after the import.
+ */
+export async function catchUpImport(db, tables, { apply = false } = {}) {
+  const work = async (tx) => {
+    const known = new Set(
+      (
+        await tx.query("select upper(reference_id) as r from csm.responses")
+      ).map((row) => row.r),
+    );
+    const submissions = new Set(
+      (
+        await tx.query(
+          "select submission_id from csm.responses where submission_id is not null",
+        )
+      ).map((row) => row.submission_id),
+    );
+    const codes = new Set(
+      (
+        await tx.query(
+          "select verification_code from csm.responses where verification_code is not null",
+        )
+      ).map((row) => row.verification_code),
+    );
+    const services = new Set(
+      (await tx.query("select service_id from csm.services")).map(
+        (row) => row.service_id,
+      ),
+    );
+    const fresh = tables.responses.filter(
+      (r) => !known.has(r.reference_id.toUpperCase()),
+    );
+    const twice = fresh.filter(
+      (r) => r.submission_id && submissions.has(r.submission_id),
+    );
+    const clashing = fresh.filter(
+      (r) => r.verification_code && codes.has(r.verification_code),
+    );
+    const adding = fresh.filter(
+      (r) => !twice.includes(r) && !clashing.includes(r),
+    );
+    const newServices = tables.services.filter(
+      (s) =>
+        !services.has(s.service_id) &&
+        adding.some((r) => r.service_id === s.service_id),
+    );
+    const knownAudit = new Set(
+      (await tx.query("select audit_id from csm.audit_log")).map(
+        (row) => row.audit_id,
+      ),
+    );
+    const auditAfter = tables.auditLog.filter(
+      (e) => !knownAudit.has(e.audit_id),
+    ).length;
+    if (apply) {
+      await insertRows(
+        tx,
+        "csm.services",
+        [
+          "service_id",
+          "code",
+          "name_en",
+          "name_tl",
+          "category",
+          "active",
+          "has_fees",
+          "sort_order",
+          "created_at",
+          "updated_at",
+        ],
+        newServices,
+      );
+      await insertRows(tx, "csm.responses", RESPONSE_COLUMNS, adding);
+    }
+    return {
+      added: adding.map((r) => r.reference_id),
+      skippedAsDuplicates: twice.map((r) => r.reference_id),
+      clashingCodes: clashing.map((r) => r.reference_id),
+      programsAdded: newServices.map((s) => s.service_id),
+      auditEntriesLeftInSheet: auditAfter,
+    };
+  };
+  return apply ? db.transaction(work) : work(db);
+}

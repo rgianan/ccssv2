@@ -79,10 +79,6 @@ describe("an import", () => {
     const different = results.filter((r) => !r.same);
     assert.deepEqual(different, []);
     assert.ok(results.length > 30, `${results.length} checks ran`);
-    assert.ok(
-      known.longIssueTimes > 0,
-      "issue times stored as dates were met and matched",
-    );
     assert.equal(known.blankAnswers, 2);
   });
 

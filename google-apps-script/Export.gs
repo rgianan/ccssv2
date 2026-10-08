@@ -60,3 +60,87 @@ function exportCsmData() {
     'Download it, run the import, then delete it from Drive and from your computer.');
   return { status: 'OK', file: file.getUrl(), rows: counts };
 }
+
+// --------------------------------- Rollback ----------------------------------
+
+/**
+ * Undoing a cutover: puts back what the new backend took after it, from the
+ * file `npm run db:rollback` makes ("CSM rollback …json"). Upload that file
+ * to Drive, then run this from the editor. Responses already in the sheet are
+ * left alone, so running it twice adds nothing twice. Other administrator
+ * actions the file lists — a program edited, a request declined — are for
+ * redoing by hand.
+ */
+function restoreFromNewBackend() {
+  var files = DriveApp.searchFiles("title contains 'CSM rollback' and trashed = false"), newest = null;
+  while (files.hasNext()) {
+    var file = files.next();
+    if (!newest || file.getDateCreated() > newest.getDateCreated()) newest = file;
+  }
+  if (!newest)
+    throw new Error('Upload the file npm run db:rollback made (named "CSM rollback …") to Drive first.');
+  var result = restoreRows_(JSON.parse(newest.getBlob().getDataAsString()));
+  Logger.log('From "' + newest.getName() + '": ' + JSON.stringify(result));
+  return result;
+}
+
+function restoreRows_(data) {
+  if (!data || data.format !== 'csm-rollback-1')
+    throw new Error('That is not a file from npm run db:rollback.');
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    var sh = ensureResponseColumns_(), hdr = getHeaderMap_(sh), lastCol = sh.getLastColumn();
+    var col = responseFieldColumns_(hdr), rowOf = {};
+    if (sh.getLastRow() >= 2)
+      sh.getRange(2, col.referenceId + 1, sh.getLastRow() - 1, 1).getValues().forEach(function (cell, i) {
+        var ref = safeTrim_(cell[0]).toUpperCase();
+        if (ref) rowOf[ref] = i + 2;
+      });
+
+    // Written as submitResponse and issueCoa_ write them: times as dates, the
+    // issue time and notice version as text, everything else made safe.
+    function asCell(header, value) {
+      if (value === '' || value === null || value === undefined) return '';
+      if (header === 'Timestamp' || header === 'privacy_notice_presented_at') return new Date(value);
+      if (header === 'COAIssuedAt' || header === 'privacy_notice_version') return "'" + value;
+      return safeSheetValue_(value);
+    }
+
+    var added = [], skipped = [], rows = [];
+    (data.responses || []).forEach(function (response) {
+      var ref = safeTrim_(response.ResponseID).toUpperCase();
+      if (!ref || rowOf[ref]) { skipped.push(response.ResponseID); return; }
+      var row = new Array(lastCol).fill('');
+      Object.keys(response).forEach(function (header) {
+        var at = idxOf_(hdr, [header.toLowerCase()]);
+        if (at >= 0) row[at] = asCell(header, response[header]);
+      });
+      rows.push(row);
+      added.push(response.ResponseID);
+      rowOf[ref] = -1;
+    });
+    if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, lastCol).setValues(rows);
+
+    var updated = [];
+    (data.certificateUpdates || []).forEach(function (update) {
+      var rowIndex = rowOf[safeTrim_(update.ResponseID).toUpperCase()];
+      if (!(rowIndex > 0)) return;
+      var cells = {};
+      Object.keys(update).forEach(function (header) {
+        if (header === 'ResponseID') return;
+        cells[header.toLowerCase()] = header === 'COAIssuedAt' && update[header] ? "'" + update[header] : update[header];
+      });
+      writeResponseCells_(sh, hdr, rowIndex, cells);
+      invalidateCertificateCache_(update.VerificationCode);
+      updated.push(update.ResponseID);
+    });
+    invalidateResultCache_();
+    return {
+      status: 'OK', added: added, skipped: skipped, certificatesUpdated: updated,
+      otherActionsToRedo: (data.otherActions || []).length
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}

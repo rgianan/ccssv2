@@ -140,6 +140,12 @@ which the browser-facing proxy never holds.
    export) and the new backend (over the database) every admin read and lists
    any answer that differs.
 
+### Cutover
+
+The switch itself, the catch-up afterwards and the way back are in
+[CUTOVER.md](CUTOVER.md). `npm run cutover:check` confirms everything the new
+backend needs is in place before `CSM_BACKEND` is set.
+
 ## Deploy the backend (Google Apps Script)
 
 1. Create a Google Sheet for the portal and open **Extensions → Apps Script**.

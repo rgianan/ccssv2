@@ -15,7 +15,9 @@
     "db:user": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/create-user.mjs",
     "worker:check": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/worker-check.mjs",
     "db:import": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/import.mjs",
-    "db:verify": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/verify.mjs"
+    "db:verify": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/verify.mjs",
+    "db:rollback": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/rollback.mjs",
+    "cutover:check": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/preflight.mjs"
   },
   "dependencies": {
     "lucide-react": "1.27.0",

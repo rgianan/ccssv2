@@ -310,7 +310,7 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
           className="push-right"
           placement="bottom"
           align="end"
-          text="Re-read the list from the sheet"
+          text="Re-read the list"
         >
           <button
             className="mini-button"
@@ -834,7 +834,7 @@ export function ReportsPanel({ period, onError }) {
           </div>
           <Tip
             align="end"
-            text="Store these counts against the selected period. The report reads them from the sheet."
+            text="Store these counts against the selected period. The report uses the saved counts."
           >
             <button
               className="button secondary"
@@ -1814,23 +1814,27 @@ export function UsersPanel({ onError }) {
 /**
  * Where the chain broke and what that means, from the first break the backend
  * found. "A row may have been edited or deleted" left the reader to search a
- * sheet of hundreds of rows for a change that might not exist.
+ * log of hundreds of entries for a change that might not exist.
+ *
+ * Worded for either backend: the row is counted as the Audit sheet numbered
+ * its rows, so an entry carried over from the sheet points at the same row of
+ * the archived copy.
  */
 function describeChainBreak(broken) {
   const where = broken?.row
-    ? `Row ${broken.row} of the Audit sheet${broken.auditId ? ` (${broken.auditId})` : ""}`
+    ? `${broken.auditId ? `Entry ${broken.auditId}` : "An entry"} (row ${broken.row} of the log)`
     : "";
   switch (broken?.reason) {
     case "contents":
-      return `${where} no longer matches what was recorded — it was edited in Google Sheets after it was written.`;
+      return `${where} no longer matches what was recorded — it was changed after it was written.`;
     case "link":
-      return `${where} does not follow the entry above it — an entry between them was deleted, inserted or moved.`;
+      return `${where} does not follow the entry before it — an entry between them was deleted, inserted or moved.`;
     case "head":
-      return "The log ends before the most recent entry that was recorded — the last rows were deleted or cleared.";
+      return "The log ends before the most recent entry that was recorded — the last entries were deleted.";
     case "secret":
-      return "The audit signing key is missing from the script properties, so no entry can be checked.";
+      return "The audit signing key is not configured, so no entry can be checked.";
     default:
-      return "A row may have been edited or deleted directly in Google Sheets.";
+      return "An entry may have been edited or deleted.";
   }
 }
 
@@ -2002,7 +2006,7 @@ export function AuditPanel({ onError }) {
                 {data.integrity.droppedLast
                   ? ` (most recently ${data.integrity.droppedLast})`
                   : ""}
-                . Check the Apps Script executions log.
+                . Check the server log for the reason.
               </>
             ) : (
               <>

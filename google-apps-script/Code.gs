@@ -1575,6 +1575,17 @@ function cellText_(value, columnIndex) {
   return columnIndex >= 0 ? safeTrim_(value[columnIndex]) : '';
 }
 
+/**
+ * When a certificate was issued, as yyyy-MM-dd HH:mm. Issuance wrote that as
+ * text, but Sheets took it for a date and stored one, which came back as
+ * "Sun Sep 20 2026 15:05:00 GMT+0800 (…)" on the verification page and in the
+ * certificate list. A date cell is put back into the form that was written;
+ * issuance now writes the text so that Sheets keeps it as text.
+ */
+function issuedAtText_(value) {
+  return isDate_(value) ? Utilities.formatDate(value, timezone_(), 'yyyy-MM-dd HH:mm') : safeTrim_(value);
+}
+
 function buildResponseRecord_(value, col, rowIndex) {
   var record = {
     rowIndex: rowIndex,
@@ -1603,7 +1614,7 @@ function buildResponseRecord_(value, col, rowIndex) {
     coaDateTo: col.coaDateTo >= 0 ? fmtDate_(value[col.coaDateTo]) : '',
     coaStatus: cellText_(value, col.coaStatus).toUpperCase() || 'NONE',
     coaLink: cellText_(value, col.coaLink),
-    coaIssuedAt: cellText_(value, col.coaIssuedAt),
+    coaIssuedAt: col.coaIssuedAt >= 0 ? issuedAtText_(value[col.coaIssuedAt]) : '',
     coaIssueKey: cellText_(value, col.coaIssueKey),
     coaIssuedDetails: cellText_(value, col.coaIssuedDetails),
     coaDeclineReason: cellText_(value, col.coaDeclineReason),

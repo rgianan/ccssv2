@@ -528,3 +528,43 @@ describe("uploads", () => {
     );
   });
 });
+
+describe("the sheet path's issue times", () => {
+  test("are written as text, and an old date cell reads back the same way", () => {
+    const target = data.responses.find(
+      (r) => r.coaStatus === "REQUESTED" && r.coaDateFrom <= "2026-10-01",
+    );
+    gas.sheets.Settings.data.push(["coa_template_id", "TPL-1"]);
+    const issued = gas.call("adminGenerateCoa(__r, 'sheet-key', 't', '')", {
+      __r: target.referenceId,
+    });
+    assert.equal(issued.status, "OK");
+    const cell = gas.cell(target.referenceId, "COAIssuedAt");
+    assert.equal(typeof cell, "string", "Sheets was told it is text");
+    assert.match(cell, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+
+    // A row issued before the fix holds a date cell; it reads as text too.
+    const header = gas.headers.indexOf("COAIssuedAt");
+    const old = data.responses.find((r) => r.coaStatus === "ISSUED");
+    const rows = gas.sheets.Responses.data.map((row) =>
+      row[gas.headers.indexOf("ResponseID")] === old.referenceId
+        ? row.map((value, i) =>
+            i === header ? new Date("2026-09-20T07:05:00Z") : value,
+          )
+        : row,
+    );
+    gas.setSheet("Responses", rows);
+    gas.call(
+      "ENSURED_SHEETS_ = {}; CacheService.getScriptCache().remove('COA_VERIFY_' + __c)",
+      {
+        __c: old.verificationCode,
+      },
+    );
+    assert.equal(gas.record(old.referenceId).coaIssuedAt, "2026-09-20 15:05");
+    assert.equal(
+      gas.call("verifyCertificate(__c)", { __c: old.verificationCode })
+        .issuedAt,
+      "2026-09-20 15:05",
+    );
+  });
+});

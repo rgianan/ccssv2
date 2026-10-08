@@ -38,7 +38,6 @@ try {
   const k = outcome.known;
   console.log(
     `\nKnown differences, already matched up: ` +
-      `${k.longIssueTimes} certificate issue time(s) Apps Script showed as a long date, ` +
       `${k.blankAnswers} response(s) with blank answers now stored as N/A, ` +
       `${k.invalidAges} response(s) with an age outside 1–120 now N/A.`,
   );

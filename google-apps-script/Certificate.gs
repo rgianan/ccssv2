@@ -390,8 +390,10 @@ function adminGenerateCoa(responseId, issueKey, adminToken, expectedStatus) {
   var outputFolder = getOrCreateFolder_(COA_OUTPUT_FOLDER_SETTING, 'OSDS Certificates of Appearance');
   // Issuance records what it printed; that write needs its column to exist.
   ensureResponseColumns_();
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(45000))
+  var lock = LockService.getScriptLock(), lockStarted = Date.now();
+  var locked = lock.tryLock(45000);
+  perfAdd_('lockWaitMs', Date.now() - lockStarted);
+  if (!locked)
     throw new Error('Another certificate is being issued right now. Wait a moment, then refresh the list before trying again.');
   try {
     return issueCoa_(responseId, safeTrim_(issueKey).slice(0, 64), outputFolder, expectedStatus);

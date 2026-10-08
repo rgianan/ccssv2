@@ -68,6 +68,7 @@ function doGet() {
 }
 
 function doPost(e) {
+  perfStart_();
   var body = null, action = '', auditActor = null, requestContext = {};
   try {
     var raw = (e && e.postData && e.postData.contents) || '{}';
@@ -115,20 +116,59 @@ function doPost(e) {
     else throw new Error('Unknown action: ' + action);
 
     if (isAuditedAction_(action)) {
+      var auditStarted = Date.now();
       try {
         appendAuditForRequest_(action, body, true, '', auditActorForResult_(action, data, auditActor), requestContext);
       } catch (auditError) {
         console.error('Audit write failed: ' + String(auditError && auditError.message || auditError));
       }
+      perfAdd_('auditMs', Date.now() - auditStarted);
     }
-    return jsonResponse_({ ok: true, data: data });
+    return jsonResponse_({ ok: true, data: data, perf: perfReport_(action, requestContext, true) });
   } catch (error) {
     try {
       if (body && isAuditedAction_(action))
         appendAuditForRequest_(action, body, false, error && error.message ? error.message : String(error), auditActor, requestContext);
     } catch (_) {}
-    return jsonResponse_({ ok: false, error: error && error.message ? error.message : String(error) });
+    return jsonResponse_({ ok: false, error: error && error.message ? error.message : String(error),
+      perf: perfReport_(action, requestContext, false) });
   }
+}
+
+// ------------------------- Phase 0 of the migration -------------------------
+//
+// Where each request's time goes. One record per execution: the proxy logs it
+// beside its own round-trip time, which is the only way to see what starting
+// the script costs, and removes it before the reply reaches the browser. It
+// is also written to this script's execution log. A few Date.now() calls per
+// request; it goes when the backend moves.
+var PERF_ = null;
+
+function perfStart_() {
+  PERF_ = { started: Date.now() };
+}
+
+function perfAdd_(key, amount) {
+  if (PERF_) PERF_[key] = (PERF_[key] || 0) + amount;
+}
+
+/**
+ * ms: the whole request inside the script. readMs, rowsRead, fullReads: reads
+ * of the Responses sheet. cacheHits, cacheMisses, computeMs: the result cache.
+ * lockWaitMs: waiting for another request to finish writing. sessionMs:
+ * finding an administrator's session. auditMs: writing the audit entry.
+ */
+function perfReport_(action, requestContext, ok) {
+  if (!PERF_) return null;
+  var report = { ms: Date.now() - PERF_.started };
+  for (var key in PERF_)
+    if (key !== 'started' && PERF_[key]) report[key] = PERF_[key];
+  try {
+    console.log('[csm-perf] ' + JSON.stringify({
+      action: action, ok: ok, requestId: safeTrim_(requestContext && requestContext.requestId), perf: report
+    }));
+  } catch (_) {}
+  return report;
 }
 
 function jsonResponse_(payload) {
@@ -390,9 +430,15 @@ function cachedResult_(name, part, fresh, compute) {
   var key = 'RESULT_' + resultCacheVersion_() + '_' + name + '_' + part;
   if (!fresh) {
     var hit = cacheGetJson_(key);
-    if (hit !== null) return hit;
+    if (hit !== null) {
+      perfAdd_('cacheHits', 1);
+      return hit;
+    }
   }
+  perfAdd_('cacheMisses', 1);
+  var computeStarted = Date.now();
   var value = compute();
+  perfAdd_('computeMs', Date.now() - computeStarted);
   cachePutJson_(key, value, RESULT_CACHE_SECONDS_);
   return value;
 }
@@ -1335,8 +1381,9 @@ function submitResponse(formData) {
   if (wantsCoa && isAfterToday_(coaFrom))
     return { status: 'BAD_REQUEST', message: 'The date of appearance cannot be in the future.' };
 
-  var lock = LockService.getDocumentLock();
+  var lock = LockService.getDocumentLock(), lockStarted = Date.now();
   lock.waitLock(20000);
+  perfAdd_('lockWaitMs', Date.now() - lockStarted);
   try {
     // A missing Responses sheet is still a setup that never ran, and says so.
     if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES))
@@ -1531,6 +1578,7 @@ function buildResponseRecord_(value, col, rowIndex) {
 function readResponses_() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESPONSES);
   if (!sh || sh.getLastRow() < 2) return { rows: [], sheet: sh, header: sh ? getHeaderMap_(sh) : {} };
+  var readStarted = Date.now();
   var hdr = getHeaderMap_(sh), col = responseFieldColumns_(hdr);
   var values = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
   var rows = [];
@@ -1539,6 +1587,9 @@ function readResponses_() {
     if (!cellText_(values[i], col.referenceId)) continue;
     rows.push(buildResponseRecord_(values[i], col, i + 2));
   }
+  perfAdd_('readMs', Date.now() - readStarted);
+  perfAdd_('rowsRead', values.length);
+  perfAdd_('fullReads', 1);
   return { rows: rows, sheet: sh, header: hdr };
 }
 
@@ -1551,7 +1602,10 @@ function readResponses_() {
 function findResponseByColumn_(sheet, col, columnIndex, wanted) {
   wanted = safeTrim_(wanted).toUpperCase();
   if (columnIndex < 0 || !wanted || sheet.getLastRow() < 2) return null;
+  var lookupStarted = Date.now();
   var values = sheet.getRange(2, columnIndex + 1, sheet.getLastRow() - 1, 1).getValues();
+  perfAdd_('readMs', Date.now() - lookupStarted);
+  perfAdd_('rowsRead', values.length);
   for (var i = values.length - 1; i >= 0; i--) {
     if (safeTrim_(values[i][0]).toUpperCase() !== wanted) continue;
     var rowIndex = i + 2;
@@ -1877,7 +1931,9 @@ function readResponseWindow_(offset, limit) {
   // The reference column alone says which rows are real and how many there
   // are — an exact count, at a fraction of the cost of parsing every column.
   // Reading the sheet's row count instead would include any blank row.
+  var windowStarted = Date.now();
   var refs = sh.getRange(2, col.referenceId + 1, sh.getLastRow() - 1, 1).getValues();
+  perfAdd_('rowsRead', refs.length);
   var rowNumbers = [];
   for (var i = 0; i < refs.length; i++)
     if (safeTrim_(refs[i][0])) rowNumbers.push(i + 2);
@@ -1890,6 +1946,8 @@ function readResponseWindow_(offset, limit) {
   // One block read covers the page; only those rows are built into records.
   var top = Math.min.apply(null, wanted), bottom = Math.max.apply(null, wanted);
   var block = sh.getRange(top, 1, bottom - top + 1, sh.getLastColumn()).getValues();
+  perfAdd_('readMs', Date.now() - windowStarted);
+  perfAdd_('rowsRead', block.length);
   return {
     rows: wanted.map(function (rowNumber) {
       return buildResponseRecord_(block[rowNumber - top], col, rowNumber);
@@ -2211,9 +2269,11 @@ function getAdminSession_(token) {
 }
 
 function loadAdminSession_(token) {
+  var sessionStarted = Date.now();
   var key = adminSessionKey_(token), cache = CacheService.getScriptCache();
   var cached = cache.get(key);
   var json = cached || PropertiesService.getScriptProperties().getProperty(key);
+  perfAdd_('sessionMs', Date.now() - sessionStarted);
   if (!json) return null;
   try {
     var storedJson = json, session = JSON.parse(json);
@@ -2693,8 +2753,10 @@ function appendAuditForRequest_(action, body, success, errorMessage, actor, requ
   // Waiting on those for 5s and then returning meant every privileged action
   // taken during a 60s report build went unrecorded, with the chain still
   // validating over what did get written.
-  var lock = LockService.getDocumentLock();
-  if (!lock.tryLock(20000)) {
+  var lock = LockService.getDocumentLock(), lockStarted = Date.now();
+  var locked = lock.tryLock(20000);
+  perfAdd_('lockWaitMs', Date.now() - lockStarted);
+  if (!locked) {
     recordAuditDrop_(action, 'could not acquire the audit lock');
     return;
   }

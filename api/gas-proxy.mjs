@@ -120,6 +120,28 @@ const explainNonJson = (status, text) => {
   return { message, detail };
 };
 
+/**
+ * The same timings as a Server-Timing header, which the browser's developer
+ * tools show under a request's Timing tab: an administrator on a slow screen
+ * can see where that request's time went without anyone opening a log.
+ */
+const serverTiming = (upstreamMs, perf) => {
+  const metric = (name, value, label) =>
+    Number.isFinite(value)
+      ? `${name};dur=${Math.max(0, Math.round(value))};desc="${label}"`
+      : "";
+  return [
+    metric("total", upstreamMs, "Proxy to Apps Script and back"),
+    metric("script", perf.ms, "Inside Apps Script"),
+    metric("startup", upstreamMs - perf.ms, "Reaching and starting the script"),
+    metric("read", perf.readMs, "Reading the Responses sheet"),
+    metric("lock", perf.lockWaitMs, "Waiting for another request"),
+    metric("compute", perf.computeMs, "Building an uncached result"),
+  ]
+    .filter(Boolean)
+    .join(", ");
+};
+
 function readBody(req) {
   if (typeof req.body === "string") return Promise.resolve(req.body);
   if (req.body && typeof req.body === "object")
@@ -304,6 +326,7 @@ export default async function handler(req, res) {
       clientIp,
     };
 
+    const upstreamStarted = performance.now();
     const upstream = await fetch(gasUrl, {
       method: "POST",
       headers: { "content-type": "text/plain;charset=utf-8" },
@@ -316,8 +339,10 @@ export default async function handler(req, res) {
       signal: AbortSignal.timeout(50_000),
     });
     const responseText = await upstream.text();
+    const upstreamMs = Math.round(performance.now() - upstreamStarted);
+    let reply;
     try {
-      JSON.parse(responseText);
+      reply = JSON.parse(responseText);
     } catch {
       const { message, detail } = explainNonJson(upstream.status, responseText);
       // The page itself, for whoever reads the function log: the browser gets
@@ -327,8 +352,28 @@ export default async function handler(req, res) {
       );
       return send(res, 502, { ok: false, error: message });
     }
-    res.writeHead(upstream.ok ? 200 : 502, SECURITY_HEADERS);
-    res.end(responseText);
+    // Phase 0 of the migration: the backend reports where its time went. That
+    // is logged here beside the round trip, whose remainder is the cost of
+    // reaching and starting the script, and is never sent on to the browser.
+    const perf = reply && typeof reply === "object" ? reply.perf : null;
+    const headers = { ...SECURITY_HEADERS };
+    if (perf && typeof perf === "object") {
+      delete reply.perf;
+      console.log(
+        `[csm-perf] ${JSON.stringify({
+          action: String(payload.action || "").slice(0, 60),
+          requestId: payload.requestContext.requestId,
+          ok: reply.ok !== false,
+          upstreamMs,
+          scriptMs: perf.ms,
+          startupMs: Number.isFinite(perf.ms) ? upstreamMs - perf.ms : null,
+          perf,
+        })}`,
+      );
+      headers["server-timing"] = serverTiming(upstreamMs, perf);
+    }
+    res.writeHead(upstream.ok ? 200 : 502, headers);
+    res.end(perf ? JSON.stringify(reply) : responseText);
   } catch (error) {
     send(res, 502, {
       ok: false,
@@ -339,4 +384,4 @@ export default async function handler(req, res) {
 
 /* Named alongside the default export so tests exercise this module rather than
    a copy of it. Vercel invokes the default export and ignores these. */
-export { explainNonJson, idempotencyKey, replayScopeFor };
+export { explainNonJson, idempotencyKey, replayScopeFor, serverTiming };

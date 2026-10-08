@@ -110,12 +110,22 @@ try {
   await db?.end();
 }
 
+// The worker is the production Apps Script project, at GAS_WEB_APP_URL.
+report(
+  /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(
+    env("GAS_WEB_APP_URL"),
+  ),
+  "GAS_WEB_APP_URL is the production web app",
+  env("GAS_WEB_APP_URL") ? "" : "not set — copy it from Vercel",
+);
 const workerUrl = env("CSM_WORKER_URL") || env("GAS_WEB_APP_URL");
 if (!workerUrl || !env("CSM_WORKER_TOKEN"))
   report(
     false,
     "the Apps Script worker is configured",
-    "set CSM_WORKER_TOKEN (and CSM_WORKER_URL, or GAS_WEB_APP_URL)",
+    !env("CSM_WORKER_TOKEN")
+      ? "CSM_WORKER_TOKEN is not set"
+      : "no worker address: set GAS_WEB_APP_URL",
   );
 else
   try {

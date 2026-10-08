@@ -74,6 +74,12 @@ function doPost(e) {
     var raw = (e && e.postData && e.postData.contents) || '{}';
     if (raw.length > 6000000) throw new Error('Request payload is too large.');
     body = JSON.parse(raw);
+    // The new backend's calls to the worker (Worker.gs) carry their own token,
+    // which the browser-facing proxy never holds; they skip everything below.
+    // Checked for first: a project updated without Worker.gs must go on
+    // answering the portal rather than fail every request.
+    if (body && typeof isWorkerAction_ === 'function' && isWorkerAction_(safeTrim_(body.action)))
+      return handleWorkerRequest_(body, safeTrim_(body.action));
     assertSubmitSharedToken_(body.proxyToken);
     delete body.proxyToken;
     rememberPortalBaseUrl_(body.portalBaseUrl);
@@ -375,7 +381,43 @@ function portalBaseUrl_() {
 }
 
 function invalidatePublicCache_() {
-  CacheService.getScriptCache().removeAll(['PUBLIC_CSM_CONFIG']);
+  CacheService.getScriptCache().removeAll(['PUBLIC_CSM_CONFIG', SETTINGS_CACHE_KEY_, SERVICES_CACHE_KEY_]);
+}
+
+// ----------------------- Cached settings and programmes -----------------------
+
+/**
+ * Reading even a six-row sheet costs 150-300 ms, against about 40 ms for a
+ * cache read, so the paths that only show or check settings and programmes
+ * read this copy. Every change to either sheet clears it through
+ * invalidatePublicCache_: writeSettings_, adminSaveService, the seeds, a reset,
+ * and hand edits through the change trigger. A read racing a save can put the
+ * old copy back; the lifetime bounds that, as it does for the public list.
+ *
+ * Code that writes back what it read, or puts a name on a certificate or a
+ * report, reads the sheet itself.
+ */
+var SETTINGS_CACHE_KEY_ = 'CSM_SETTINGS';
+var SERVICES_CACHE_KEY_ = 'CSM_SERVICES';
+
+function cachedSettings_() {
+  return cachedSheetRead_(SETTINGS_CACHE_KEY_, readSettings_);
+}
+
+function cachedServices_() {
+  return cachedSheetRead_(SERVICES_CACHE_KEY_, readServices_);
+}
+
+function cachedSheetRead_(key, read) {
+  var hit = cacheGetJson_(key);
+  if (hit !== null) {
+    perfAdd_('cacheHits', 1);
+    return hit;
+  }
+  perfAdd_('cacheMisses', 1);
+  var value = read();
+  cachePutJson_(key, value, PUBLIC_CACHE_SECONDS);
+  return value;
 }
 
 // ------------------------------- Result cache ---------------------------------
@@ -1096,7 +1138,7 @@ function readServices_() {
 
 function adminGetServices(adminToken) {
   requireAdmin_(adminToken);
-  return readServices_();
+  return cachedServices_();
 }
 
 function adminSaveService(payload, adminToken) {
@@ -1283,7 +1325,7 @@ function submitResponse(formData) {
   if (regionCode_(region) === 'N/A')
     return { status: 'BAD_REQUEST', message: 'Please choose your region of residence from the list.' };
 
-  var service = readServices_().filter(function (entry) {
+  var service = cachedServices_().filter(function (entry) {
     return entry.service_id === safeTrim_(formData.serviceId) && entry.active;
   })[0];
   // Also the answer when a programme is withdrawn while a client has the form
@@ -1716,7 +1758,7 @@ function computeOverview_(period) {
   // the filed workbook gave two different scores for the same quarter.
   var records = applyAnswerPolicy_(
     allRecords.filter(function (record) { return inPeriod_(record, period); }),
-    readServices_()
+    cachedServices_()
   );
 
   var sqd = {}, cc = {}, clientTypes = {}, sexes = {}, ageBrackets = {}, byService = {};
@@ -1853,7 +1895,7 @@ function adminChangeResponseService(payload, adminToken) {
   // Any programme on the list, not only the active ones. A response recorded
   // last quarter may belong to one the office has since withdrawn, and
   // refusing that would leave the only correct answer unavailable.
-  var service = readServices_().filter(function (entry) {
+  var service = cachedServices_().filter(function (entry) {
     return entry.service_id === serviceId;
   })[0];
   if (!service)
@@ -1986,7 +2028,7 @@ function adminGetServiceStats(periodInput, adminToken) {
   var period = normalizePeriod_(periodInput);
   var stats = readServiceStats_(period.key);
   var records = readResponses_().rows.filter(function (record) { return inPeriod_(record, period); });
-  return readServices_().map(function (service) {
+  return cachedServices_().map(function (service) {
     var stat = stats[service.service_id] || {};
     return {
       service_id: service.service_id, code: service.code, name_en: service.name_en,
@@ -2573,7 +2615,7 @@ function sha256Bytes_(bytes) {
 
 function adminGetSettings(adminToken) {
   requireAdmin_(adminToken);
-  return readSettings_();
+  return cachedSettings_();
 }
 
 /**

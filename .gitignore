@@ -4,3 +4,5 @@ dist/
 .env*.local
 .vercel
 .reference/
+# Migration exports: every response and the admins' password hashes
+.import/

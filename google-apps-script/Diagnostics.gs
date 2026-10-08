@@ -36,7 +36,7 @@ function csmDiagnostics() {
     });
   });
   report.allocatedCells = allocated;
-  report.percentOfCellLimit = Math.round(allocated / 100000) / 100;
+  report.percentOfCellLimit = Math.round(allocated / 1000) / 100;
 
   // --- What the Responses sheet holds, by year.
   var sh = ss.getSheetByName(SHEET_RESPONSES);

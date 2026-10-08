@@ -6,6 +6,9 @@ import { createHash, randomUUID } from "node:crypto";
  * The browser never learns GAS_WEB_APP_URL, SUBMIT_SHARED_TOKEN, or the
  * Turnstile secret: this function holds them, validates the Cloudflare token
  * for the two public actions, and forwards everything else untouched.
+ *
+ * With CSM_BACKEND=postgres it answers from the new backend in server/
+ * instead, after the same checks; see answerFromDatabase.
  */
 
 const SECURITY_HEADERS = {
@@ -166,12 +169,71 @@ function readBody(req) {
   });
 }
 
+/**
+ * Which backend answers. Apps Script until cutover; CSM_BACKEND=postgres
+ * moves every action to the new backend in server/ at once — the two hold
+ * separate data, so they are never mixed action by action.
+ */
+const usesDatabase = () =>
+  String(process.env.CSM_BACKEND || "")
+    .trim()
+    .toLowerCase() === "postgres";
+
+/** The new backend's timings, in the same header the Apps Script path sends. */
+const databaseTiming = (perf) =>
+  [
+    `total;dur=${Math.max(0, Math.round(perf.ms))};desc="Inside the backend"`,
+    `db;dur=${Math.max(0, Math.round(perf.dbMs))};desc="Database (${perf.queries} queries)"`,
+  ].join(", ");
+
+/**
+ * Answers the request here, from the database, in the reply shape Apps Script
+ * gives. Loaded only when used, so the Apps Script path never pays for the
+ * database driver.
+ */
+async function answerFromDatabase(res, payload) {
+  const action = String(payload.action || "").slice(0, 60);
+  let reply;
+  try {
+    const { database } = await import("../server/db.mjs");
+    const { handleRequest } = await import("../server/dispatch.mjs");
+    reply = await handleRequest(payload, {
+      db: database(),
+      requestContext: payload.requestContext,
+    });
+  } catch (error) {
+    // Only configuration fails out here; handleRequest answers its own errors.
+    console.error(`[csm-backend] ${action}:`, error);
+    return send(res, 500, { ok: false, error: error.message || String(error) });
+  }
+  const { perf } = reply;
+  delete reply.perf;
+  console.log(
+    `[csm-perf] ${JSON.stringify({
+      backend: "postgres",
+      action,
+      requestId: payload.requestContext.requestId,
+      ok: reply.ok !== false,
+      ...perf,
+    })}`,
+  );
+  res.writeHead(200, {
+    ...SECURITY_HEADERS,
+    "server-timing": databaseTiming(perf),
+  });
+  res.end(JSON.stringify(reply));
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return send(res, 405, { ok: false, error: "Method not allowed." });
 
+  const database = usesDatabase();
   const gasUrl = String(process.env.GAS_WEB_APP_URL || "").trim();
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(gasUrl))
+  if (
+    !database &&
+    !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(gasUrl)
+  )
     return send(res, 500, {
       ok: false,
       error:
@@ -179,7 +241,7 @@ export default async function handler(req, res) {
     });
 
   const sharedToken = String(process.env.SUBMIT_SHARED_TOKEN || "").trim();
-  if (sharedToken.length < 64)
+  if (!database && sharedToken.length < 64)
     return send(res, 500, {
       ok: false,
       error:
@@ -206,6 +268,16 @@ export default async function handler(req, res) {
   try {
     if (!payload || typeof payload !== "object" || Array.isArray(payload))
       return send(res, 400, { ok: false, error: "Invalid JSON request." });
+
+    // The worker's actions make official certificates and send the office's
+    // email. Only the new backend asks for them, with a token this function
+    // never holds; from a browser they are not actions at all.
+    if (/^worker/i.test(String(payload.action || "")))
+      return send(res, 400, {
+        ok: false,
+        error: `Unknown action: ${String(payload.action).slice(0, 60)}`,
+      });
+    delete payload.workerToken;
 
     // Read before the Turnstile check, which needs the hostname out of it.
     const portalBaseUrl = String(process.env.PORTAL_BASE_URL || "")
@@ -305,7 +377,6 @@ export default async function handler(req, res) {
       if (payload.payload) delete payload.payload.turnstileToken;
     }
 
-    payload.proxyToken = sharedToken;
     // Only the configured value, never the request's Host header. The backend
     // stores whatever base URL it is handed and points every future
     // certificate QR code and verification link at it, so a spoofed Host on a
@@ -326,6 +397,9 @@ export default async function handler(req, res) {
       clientIp,
     };
 
+    if (database) return await answerFromDatabase(res, payload);
+
+    payload.proxyToken = sharedToken;
     const upstreamStarted = performance.now();
     const upstream = await fetch(gasUrl, {
       method: "POST",
@@ -384,4 +458,10 @@ export default async function handler(req, res) {
 
 /* Named alongside the default export so tests exercise this module rather than
    a copy of it. Vercel invokes the default export and ignores these. */
-export { explainNonJson, idempotencyKey, replayScopeFor, serverTiming };
+export {
+  databaseTiming,
+  explainNonJson,
+  idempotencyKey,
+  replayScopeFor,
+  serverTiming,
+};

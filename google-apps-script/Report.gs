@@ -226,8 +226,9 @@ function adminGenerateReport(periodInput, adminToken) {
  * shared with the portal's own administrators rather than published to anyone
  * holding the link the way a client's certificate is.
  */
-function shareReportWithAdmins_(file, actorEmail) {
-  var recipients = activeAdminEmails_(), actor = safeTrim_(actorEmail).toLowerCase();
+function shareReportWithAdmins_(file, actorEmail, adminEmails) {
+  var recipients = adminEmails ? adminEmails.slice() : activeAdminEmails_();
+  var actor = safeTrim_(actorEmail).toLowerCase();
   if (actor && recipients.indexOf(actor) < 0) recipients.push(actor);
 
   // The account running the script owns the file and already has access;
@@ -309,7 +310,24 @@ function buildReport_(period, actorEmail, folder) {
   if (!records.length)
     throw new Error('There are no responses for ' + period.label + ' yet.');
 
-  var stats = readServiceStats_(period.key);
+  var built = buildReportWorkbook_(period, settings, services, records,
+    readServiceStats_(period.key), folder, actorEmail);
+  var reportId = 'RPT-' + Utilities.getUuid().replace(/-/g,'').slice(0, 10).toUpperCase();
+  recordGeneratedReport_(reportId, built.file, period, actorEmail);
+  return {
+    status: 'OK', report_id: reportId, name: built.file.getName(),
+    url: built.file.getUrl(), period: period.key, accessNote: built.accessNote
+  };
+}
+
+/**
+ * The workbook itself, from records already read and put through
+ * applyAnswerPolicy_: built, exported to .xlsx in `folder`, and shared with
+ * the administrators. Reads and records nothing — buildReport_ does that
+ * here, and the new backend does it when the worker (Worker.gs) calls this.
+ * `adminEmails` defaults to the Whitelist's active administrators.
+ */
+function buildReportWorkbook_(period, settings, services, records, stats, folder, actorEmail, adminEmails) {
   var workbookName = 'CSM Summary Report — OSDS — ' + period.label;
   var temporary = SpreadsheetApp.create(workbookName);
 
@@ -338,14 +356,7 @@ function buildReport_(period, actorEmail, folder) {
     xlsx.setName(workbookName + '.xlsx');
     var file = folder.createFile(xlsx);
 
-    var accessNote = shareReportWithAdmins_(file, actorEmail);
-
-    var reportId = 'RPT-' + Utilities.getUuid().replace(/-/g,'').slice(0, 10).toUpperCase();
-    recordGeneratedReport_(reportId, file, period, actorEmail);
-    return {
-      status: 'OK', report_id: reportId, name: file.getName(),
-      url: file.getUrl(), period: period.key, accessNote: accessNote
-    };
+    return { file: file, accessNote: shareReportWithAdmins_(file, actorEmail, adminEmails) };
   } finally {
     // The temporary Google Sheet is scaffolding; only the exported file is kept.
     try { DriveApp.getFileById(temporary.getId()).setTrashed(true); } catch (_) {}

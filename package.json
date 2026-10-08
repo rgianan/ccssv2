@@ -7,14 +7,25 @@
     "dev": "vite",
     "dev:vercel": "npx --yes vercel dev",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:server": "node --test \"server/test/*.test.mjs\"",
+    "db:migrate": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/migrate.mjs",
+    "db:seed": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/seed.mjs",
+    "db:check": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/check.mjs",
+    "db:user": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/create-user.mjs",
+    "worker:check": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/worker-check.mjs",
+    "db:import": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/import.mjs",
+    "db:verify": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/verify.mjs"
   },
   "dependencies": {
+    "lucide-react": "1.27.0",
+    "postgres": "3.4.9",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "lucide-react": "1.27.0"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-socket": "0.2.11",
     "@vitejs/plugin-react": "6.0.4",
     "vite": "8.1.5"
   }

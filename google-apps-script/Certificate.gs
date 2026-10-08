@@ -477,8 +477,6 @@ function issueCoa_(responseId, issueKey, outputFolder, expectedStatus) {
 
   try {
     var issuedOn = new Date();
-    var docName = ('COA - ' + record.coaName + ' - ' + record.referenceId).slice(0, 180);
-    var docId = createCoaWorkingCopy_(templateId, docName, outputFolder);
 
     // A reissue that prints the same details keeps the code, so the earlier
     // copy — identical — goes on verifying. One that prints different details
@@ -502,51 +500,9 @@ function issueCoa_(responseId, issueKey, outputFolder, expectedStatus) {
       ? ''
       : 'PORTAL_BASE_URL is not set in Vercel, so this certificate carries no QR code or verification link.';
 
-    var doc = DocumentApp.openById(docId);
-    replaceDocText_(doc, '{{title}}', record.coaTitle);
-    replaceDocText_(doc, '{{name_of_client}}', record.coaName);
-    replaceDocText_(doc, '{{agency}}', record.coaAgency);
-    replaceDocText_(doc, '{{purpose}}', record.coaPurpose);
-    replaceDocText_(doc, '{{date_coverage}}', dateCoverage_(record.coaDateFrom, record.coaDateTo));
-    replaceDocText_(doc, '{{date_issued}}', issuedPhrase_(issuedOn));
-    replaceDocText_(doc, '{{signatory}}', settings.coa_signatory);
-    replaceDocText_(doc, '{{designation}}', settings.coa_designation);
-    replaceDocText_(doc, '{{Timestamp}}', Utilities.formatDate(issuedOn, timezone_(), 'MMMM d, yyyy \'at\' h:mm a'));
-    replaceDocText_(doc, '{{VerificationCode}}', verificationCode);
-    replaceDocText_(doc, '{{VerificationUrl}}', verificationUrl);
-
-    if (safeTrim_(settings.coa_signature_id)) {
-      try {
-        replaceDocImage_(doc, '{{Signature}}', DriveApp.getFileById(settings.coa_signature_id).getBlob(), 150);
-      } catch (signatureError) {
-        replaceDocText_(doc, '{{Signature}}', '');
-      }
-    } else {
-      replaceDocText_(doc, '{{Signature}}', '');
-    }
-
-    if (verificationUrl) {
-      try {
-        var qr = UrlFetchApp.fetch('https://quickchart.io/qr?size=300&margin=2&text=' + encodeURIComponent(verificationUrl))
-          .getBlob().setName('verification-qr.png');
-        replaceDocImage_(doc, '{{QRCode}}', qr, 90);
-      } catch (qrError) {
-        replaceDocText_(doc, '{{QRCode}}', '');
-      }
-    } else {
-      replaceDocText_(doc, '{{QRCode}}', '');
-    }
-
-    doc.saveAndClose();
-
-    var pdfBlob = driveExportPdf_(docId);
-    pdfBlob.setName('Certificate of Appearance - ' + record.coaName + ' - ' + record.referenceId + '.pdf');
-    var pdfFile = outputFolder.createFile(pdfBlob);
-    var shared = shareFileByLink_(pdfFile);
-    // The working Google Doc has served its purpose; the PDF is the record.
-    try { DriveApp.getFileById(docId).setTrashed(true); } catch (_) {}
-
-    var certificateUrl = pdfFile.getUrl();
+    var minted = mintCoaPdf_(record, settings, outputFolder, verificationCode, verificationUrl, issuedOn);
+    var pdfBlob = minted.pdfBlob, shared = minted.shared;
+    var certificateUrl = minted.pdfFile.getUrl();
 
     // Record the issuance before sending: a client must never be holding a
     // certificate link that the office register still reports as unissued.
@@ -604,6 +560,64 @@ function issueCoa_(responseId, issueKey, outputFolder, expectedStatus) {
     invalidateCertificateCache_(record.verificationCode);
     throw error;
   }
+}
+
+/**
+ * The certificate itself: the template filled in, exported to PDF and filed
+ * in `outputFolder`. Touches no sheet — issueCoa_ does the bookkeeping here,
+ * and the new backend does it when the worker (Worker.gs) calls this.
+ *
+ * Returns the PDF's Drive file, the blob to attach, and whether link sharing
+ * was allowed.
+ */
+function mintCoaPdf_(record, settings, outputFolder, verificationCode, verificationUrl, issuedOn) {
+  var docName = ('COA - ' + record.coaName + ' - ' + record.referenceId).slice(0, 180);
+  var docId = createCoaWorkingCopy_(safeTrim_(settings.coa_template_id), docName, outputFolder);
+
+  var doc = DocumentApp.openById(docId);
+  replaceDocText_(doc, '{{title}}', record.coaTitle);
+  replaceDocText_(doc, '{{name_of_client}}', record.coaName);
+  replaceDocText_(doc, '{{agency}}', record.coaAgency);
+  replaceDocText_(doc, '{{purpose}}', record.coaPurpose);
+  replaceDocText_(doc, '{{date_coverage}}', dateCoverage_(record.coaDateFrom, record.coaDateTo));
+  replaceDocText_(doc, '{{date_issued}}', issuedPhrase_(issuedOn));
+  replaceDocText_(doc, '{{signatory}}', settings.coa_signatory);
+  replaceDocText_(doc, '{{designation}}', settings.coa_designation);
+  replaceDocText_(doc, '{{Timestamp}}', Utilities.formatDate(issuedOn, timezone_(), 'MMMM d, yyyy \'at\' h:mm a'));
+  replaceDocText_(doc, '{{VerificationCode}}', verificationCode);
+  replaceDocText_(doc, '{{VerificationUrl}}', verificationUrl);
+
+  if (safeTrim_(settings.coa_signature_id)) {
+    try {
+      replaceDocImage_(doc, '{{Signature}}', DriveApp.getFileById(settings.coa_signature_id).getBlob(), 150);
+    } catch (signatureError) {
+      replaceDocText_(doc, '{{Signature}}', '');
+    }
+  } else {
+    replaceDocText_(doc, '{{Signature}}', '');
+  }
+
+  if (verificationUrl) {
+    try {
+      var qr = UrlFetchApp.fetch('https://quickchart.io/qr?size=300&margin=2&text=' + encodeURIComponent(verificationUrl))
+        .getBlob().setName('verification-qr.png');
+      replaceDocImage_(doc, '{{QRCode}}', qr, 90);
+    } catch (qrError) {
+      replaceDocText_(doc, '{{QRCode}}', '');
+    }
+  } else {
+    replaceDocText_(doc, '{{QRCode}}', '');
+  }
+
+  doc.saveAndClose();
+
+  var pdfBlob = driveExportPdf_(docId);
+  pdfBlob.setName('Certificate of Appearance - ' + record.coaName + ' - ' + record.referenceId + '.pdf');
+  var pdfFile = outputFolder.createFile(pdfBlob);
+  var shared = shareFileByLink_(pdfFile);
+  // The working Google Doc has served its purpose; the PDF is the record.
+  try { DriveApp.getFileById(docId).setTrashed(true); } catch (_) {}
+  return { pdfFile: pdfFile, pdfBlob: pdfBlob, shared: shared };
 }
 
 /**

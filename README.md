@@ -38,6 +38,11 @@ transaction.
 
 ```text
 api/gas-proxy.mjs          Vercel function: Turnstile check + Apps Script bridge
+server/                    New Postgres backend (migration in progress; see below)
+  dispatch.mjs             Action router, same request/reply shape as doPost
+  actions/                 Ported actions
+  schema/                  SQL migrations, applied in name order
+  test/                    node --test suites, incl. parity with the .gs files
 public/                    Static files
 src/
   lib/csm.js               Questions, regions, scales — English and Filipino
@@ -68,6 +73,72 @@ Without an API URL the app fails closed. For a UI-only walkthrough set
 
 To exercise the serverless function locally, use `npm run dev:vercel`, which
 runs `vercel dev` so `/api/gas-proxy` is served alongside the app.
+
+## New backend (migration in progress)
+
+The portal is moving from Google Sheets and Apps Script to Postgres on
+Supabase, answered by the same Vercel function. Until cutover nothing changes:
+`/api/gas-proxy` sends every request to Apps Script unless `CSM_BACKEND` is
+`postgres`, and the two backends are never mixed action by action.
+
+- `npm run test:server` runs the backend's tests on an in-process Postgres
+  (PGlite). The parity tests run the real `.gs` files beside the new code and
+  require the same answers from both.
+- `npm run db:migrate` applies `server/schema/*.sql` to `DATABASE_URL`, and
+  `npm run db:seed` adds the default programmes and settings. All the `db:`
+  scripts read `.env` or `.env.local`.
+- `npm run db:check` times a few reads and one rolled-back submission, and
+  changes nothing. `npm run db:user` creates an administrator or sets a new
+  password, typed at a hidden prompt.
+
+Ported so far:
+
+- Public: `getPortalConfig`, `submitResponse`, `verifyCertificate`.
+- Sign-in: `adminLogin`, `adminLogout`, `adminValidateSession`, and the audit
+  log they write to. Passwords set in Apps Script keep working; each is
+  re-hashed with scrypt the first time its account signs in here.
+- Admin reads: `adminGetOverview`, `adminGetResponses`, `adminGetCoaRequests`,
+  `adminGetServices`, `adminGetSettings`, `adminGetServiceStats`,
+  `adminGetReports`, `adminGetUsers`, `adminGetAuditLog`.
+- Admin writes: `adminSaveService`, `adminSaveSettings`,
+  `adminSaveServiceStats`, `adminSaveUser`, `adminChangeResponseService`,
+  `adminSaveCoaDetails`, `adminDeclineCoa`, `adminReopenCoa`. The decline
+  email goes through `server/worker.mjs`, which reaches Google in phase 2.
+
+- Google: `adminGenerateCoa`, `adminGenerateReport`, `adminUploadCoaTemplate`,
+  `adminUploadSignature`. The checks and the register are here; the file
+  itself is made by the Apps Script worker.
+
+### The Apps Script worker
+
+`google-apps-script/Worker.gs` keeps the steps that need Google: certificate
+PDFs from the Docs template, email through MailApp, report workbooks, and
+uploads to Drive. It holds no records — the backend sends what each step
+needs and records the outcome — and it answers only to `CSM_WORKER_TOKEN`,
+which the browser-facing proxy never holds.
+
+1. Add `Worker.gs` to the Apps Script project beside the other files.
+2. Run `setupCsmWorker()` once from the editor and copy the logged token.
+3. Deploy a new version of the web app (same URL).
+4. Set `CSM_WORKER_TOKEN` (and `CSM_WORKER_URL`, if the worker is not the
+   project at `GAS_WEB_APP_URL`) in Vercel or `.env`.
+5. `npm run worker:check -- --email you@ched.gov.ph` sends a test decline
+   notice; add `--template <Drive file id>` to make and send a test
+   certificate too.
+
+### Importing the sheets
+
+1. Add `google-apps-script/Export.gs` to the Apps Script project and run
+   `exportCsmData()` from the editor. It saves one JSON file to your Drive.
+2. Download it into `.import/` (git-ignored). It holds every response and the
+   administrators' password hashes: delete it, here and in Drive, when done.
+3. Set `AUDIT_HASH_SECRET` in `.env` from the project's script properties.
+4. `npm run db:import -- .import/<file>.json` is a dry run: it reports what
+   it would load and every problem by sheet and row. Add `--apply` to load,
+   all or nothing; `--replace` clears the portal's tables first.
+5. `npm run db:verify -- .import/<file>.json` asks Apps Script (over the
+   export) and the new backend (over the database) every admin read and lists
+   any answer that differs.
 
 ## Deploy the backend (Google Apps Script)
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import postgres from "postgres";
 import { database } from "./db.mjs";
 import {
   getPortalConfig,
@@ -16,6 +18,57 @@ import {
 
 class RolledBack extends Error {}
 
+// Every DATABASE_URL line in the files this reads, by user and host only.
+// With two, the later one wins, which an edit to the earlier one never shows.
+for (const file of [".env", ".env.local"]) {
+  let lines;
+  try {
+    lines = readFileSync(file, "utf8").split(/\r?\n/);
+  } catch {
+    continue;
+  }
+  const defined = lines
+    .map((line, i) => ({ line, at: i + 1 }))
+    .filter(({ line }) => /^\s*(export\s+)?DATABASE_URL\s*=/.test(line));
+  if (defined.length > 1)
+    console.log(
+      `${file} defines DATABASE_URL ${defined.length} times; the last one (line ${defined.at(-1).at}) is used:`,
+    );
+  if (defined.length > 1)
+    for (const { line, at } of defined) {
+      const value = line.replace(/^[^=]*=\s*/, "").replace(/^["']|["']$/g, "");
+      let who = "an unreadable value";
+      try {
+        const url = new URL(value);
+        who = `${decodeURIComponent(url.username)} at ${url.hostname}`;
+      } catch {}
+      console.log(`  line ${at}: ${who}`);
+    }
+}
+
+// Who and where, never the password: enough to tell a pooler string from a
+// direct one, or one project from another.
+try {
+  const url = new URL(String(process.env.DATABASE_URL || "").trim());
+  console.log(
+    `Connecting as ${decodeURIComponent(url.username)} to ${url.hostname}:${url.port || 5432}` +
+      `${url.port === "6543" ? " (transaction pooler)" : url.hostname.startsWith("db.") ? " (direct connection — Vercel cannot reach this)" : ""}.`,
+  );
+  // The usual reasons a correct-looking string is refused, named without
+  // showing the password.
+  const password = url.password;
+  if (!password) console.log("It has no password.");
+  else if (/YOUR-PASSWORD|[[\]]/i.test(password))
+    console.log("Its password is still the [YOUR-PASSWORD] placeholder.");
+  else if (/[^A-Za-z0-9%._~-]/.test(password))
+    console.log(
+      "Its password has characters that must be percent-encoded in the string.",
+    );
+  else if (/%/.test(password)) console.log("Its password is percent-encoded.");
+} catch {
+  console.log("DATABASE_URL is not a readable connection string.");
+}
+
 const db = database();
 const median = (values) => values.sort((a, b) => a - b)[values.length >> 1];
 
@@ -33,8 +86,49 @@ async function timed(label, work, runs = 3) {
   return result;
 }
 
+/**
+ * A password the pooler refuses may be wrong, or newly reset and not yet
+ * known to the pooler. The database itself, reached directly, tells the two
+ * apart. Only whether it was accepted is reported.
+ */
+async function triedDirectly() {
+  const url = new URL(String(process.env.DATABASE_URL).trim());
+  const ref = decodeURIComponent(url.username).split(".")[1];
+  if (!ref) return;
+  const direct = postgres({
+    host: `db.${ref}.supabase.co`,
+    port: 5432,
+    database: url.pathname.slice(1) || "postgres",
+    username: "postgres",
+    password: decodeURIComponent(url.password),
+    ssl: "require",
+    max: 1,
+    connect_timeout: 10,
+    onnotice: () => {},
+  });
+  try {
+    await direct`select 1`;
+    console.log(
+      "The database itself accepts this password: the pooler has not caught up with the reset yet. Wait a few minutes and run this again.",
+    );
+  } catch (error) {
+    console.log(
+      error.code === "28P01"
+        ? "The database itself refuses this password too: it is not this project's password."
+        : `The database could not be reached directly to compare (${error.code || error.message}); this network may lack IPv6.`,
+    );
+  } finally {
+    await direct.end({ timeout: 1 });
+  }
+}
+
 try {
-  await timed("Connect and first query", () => db.query("select 1"), 1);
+  try {
+    await timed("Connect and first query", () => db.query("select 1"), 1);
+  } catch (error) {
+    if (error.code === "28P01") await triedDirectly();
+    throw error;
+  }
   // Two queries at once need a second connection, which the pool opens on
   // demand; a cold function instance pays this on its first such request.
   await timed(

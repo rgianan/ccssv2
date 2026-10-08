@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { database } from "./db.mjs";
 import { migrationFiles } from "./migrate.mjs";
 import { auditCanonical, auditHmac } from "./audit.mjs";
@@ -142,12 +143,41 @@ else
       !env("CSM_WORKER_URL") ||
         env("CSM_WORKER_URL") === env("GAS_WEB_APP_URL"),
       "the worker is the production project",
-      env("CSM_WORKER_URL") !== env("GAS_WEB_APP_URL")
+      env("CSM_WORKER_URL") && env("CSM_WORKER_URL") !== env("GAS_WEB_APP_URL")
         ? "CSM_WORKER_URL points elsewhere — the staging copy?"
         : "",
     );
   } catch (error) {
     report(false, "the Apps Script worker answers", error.message);
+    if (/invalid worker token/.test(error.message)) {
+      // The token itself is never printed. Its hash is what the project keeps
+      // as WORKER_TOKEN_HASH (Project Settings → Script properties), so the
+      // start of the two can be compared by eye.
+      const token = env("CSM_WORKER_TOKEN");
+      const hash = createHash("sha256")
+        .update(token, "utf8")
+        .digest("base64url");
+      // setupCsmWorker makes 96 hex digits; anything else came from copying.
+      // A stray character is named by position, never the token around it.
+      const stray = [...token]
+        .map((c, i) =>
+          /[0-9a-f]/.test(c)
+            ? null
+            : `position ${i + 1} (${JSON.stringify(c)})`,
+        )
+        .filter(Boolean);
+      const odd = [
+        token.length !== 96 &&
+          `has ${token.length} characters where a token has 96`,
+        stray.length &&
+          `has a character that is not 0–9 or a–f at ${stray.slice(0, 3).join(", ")}`,
+      ].filter(Boolean);
+      console.log(
+        `      This token's hash starts ${hash.slice(0, 8)}.` +
+          `${odd.length ? ` It ${odd.join(", and ")}.` : ""}\n` +
+          "      Compare with the start of WORKER_TOKEN_HASH in the production project's script properties.",
+      );
+    }
   }
 
 console.log(

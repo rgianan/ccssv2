@@ -1,6 +1,11 @@
 .admin-login-page {
   min-height: 100vh;
   display: grid;
+  /* One column the width of the screen. An auto column grew to the card's
+     narrowest possible width instead — 370px, with the 300px security check
+     inside — so on any phone under about 420px the card ran off the right
+     edge and the page scrolled sideways. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 24px;
   background:
@@ -38,6 +43,16 @@
   font-size: var(--text-caption);
   font-weight: 700;
   color: var(--muted);
+}
+/* On a phone the padding comes out of the margins, so the fields and the
+   security check keep the width. */
+@media (max-width: 480px) {
+  .admin-login-page {
+    padding: 16px;
+  }
+  .admin-login-card {
+    padding: 28px 20px;
+  }
 }
 
 /* --------------------------------- Shell --------------------------------- */

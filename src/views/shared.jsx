@@ -43,7 +43,11 @@ export function TurnstileWidget({ action, onToken, resetKey = 0 }) {
           sitekey: TURNSTILE_SITE_KEY,
           action,
           theme: "light",
-          size: "flexible",
+          // "flexible" is never narrower than 300px. On a small phone the
+          // form has less than that, and the check ran past the card's edge
+          // (on sign-in) or was cut off by it (on the survey); "compact" is
+          // the 150px square Cloudflare offers for exactly that.
+          size: container.current.clientWidth < 300 ? "compact" : "flexible",
           callback: onToken,
           "expired-callback": () => onToken(""),
           "error-callback": () => onToken(""),

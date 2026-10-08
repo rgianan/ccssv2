@@ -39,6 +39,7 @@ import { COURTESY_TITLES, OTHER_SERVICE_CODE, portalToday } from "../lib/csm";
 import { describePeriod } from "./PeriodPicker";
 import {
   LoadFailed,
+  Pager,
   Skeleton,
   SkeletonLines,
   SkeletonRegion,
@@ -126,6 +127,9 @@ const clearIssueKey = (referenceId) => {
  */
 const COA_COLUMNS = ["Client", "Agency", "Purpose", "Date covered", "Actions"];
 
+/** Requests per page, as on Responses and Audit. */
+const COA_PAGE_SIZE = 25;
+
 /** The note under a request's client, when its state needs more than its tab. */
 function CoaRowNote({ row }) {
   if (row.coaStatus === "PROCESSING")
@@ -162,7 +166,20 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
     [busyId, setBusyId] = useState(""),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
-    [failed, setFailed] = useState(false);
+    [failed, setFailed] = useState(false),
+    [page, setPage] = useState(1);
+  const listTop = useRef(null);
+
+  // Each tab opens at its first page. Paged here rather than by the server:
+  // the bell shares this read of the whole queue, and a request issued or
+  // declined leaves the list without a page boundary moving under the reader.
+  useEffect(() => setPage(1), [status]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / COA_PAGE_SIZE));
+  const shownPage = Math.min(page, pageCount);
+  const pageRows = rows.slice(
+    (shownPage - 1) * COA_PAGE_SIZE,
+    shownPage * COA_PAGE_SIZE,
+  );
 
   // Tracks the filter a response belongs to, so switching tabs quickly cannot
   // leave the slower request's rows sitting under the newer tab.
@@ -365,7 +382,10 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
       ) : failed ? (
         <LoadFailed what="The certificate requests" onRetry={() => load()} />
       ) : (
-        <div className={`table-card${loading ? " is-refreshing" : ""}`}>
+        <div
+          className={`table-card${loading ? " is-refreshing" : ""}`}
+          ref={listTop}
+        >
           <div className="table-scroll">
             <table>
               <thead>
@@ -381,7 +401,7 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {pageRows.map((row) => (
                   <tr key={row.referenceId}>
                     <td>
                       <strong>
@@ -475,6 +495,14 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
               </tbody>
             </table>
           </div>
+          <Pager
+            page={shownPage}
+            pageSize={COA_PAGE_SIZE}
+            total={rows.length}
+            disabled={loading}
+            listRef={listTop}
+            onPage={setPage}
+          />
         </div>
       )}
 
@@ -1553,7 +1581,7 @@ export function SettingsPanel({ onError, canSign = false }) {
               <span>
                 {uploading === "template"
                   ? "Uploading…"
-                  : "DOCX or Google Doc, up to 10 MB"}
+                  : "Word .docx or .doc, up to 10 MB"}
               </span>
             </div>
             <input
@@ -1848,16 +1876,21 @@ function describeChainBreak(broken) {
   }
 }
 
+/** Entries per page, newest first, as on Responses and Certificates. */
+const AUDIT_PAGE_SIZE = 25;
+
 export function AuditPanel({ onError }) {
   const [data, setData] = useState(null),
     [filters, setFilters] = useState({
       action: "",
       outcome: "",
       query: "",
-      limit: 200,
+      limit: AUDIT_PAGE_SIZE,
+      offset: 0,
     }),
     [loading, setLoading] = useState(true),
     [failed, setFailed] = useState(false);
+  const listTop = useRef(null);
   const load = async (nextFilters = filters) => {
     setLoading(true);
     try {
@@ -1879,16 +1912,20 @@ export function AuditPanel({ onError }) {
     load();
   }, []);
   const entries = data?.entries || [];
-  const failures = entries.filter(
-    (entry) => entry.outcome === "FAILURE",
-  ).length;
-  const logins = entries.filter(
-    (entry) => entry.action === "LOGIN" && entry.outcome === "SUCCESS",
-  ).length;
+  // Counted by the server across every matching entry; the rows on screen are
+  // one page of them.
+  const failures = data?.summary?.failures ?? 0;
+  const logins = data?.summary?.logins ?? 0;
+  // A new filter starts again at the newest entries.
   const updateFilter = (key, value) => {
-    const next = { ...filters, [key]: value };
+    const next = { ...filters, [key]: value, offset: 0 };
     setFilters(next);
     if (key !== "query") load(next);
+  };
+  const turnPage = (page) => {
+    const next = { ...filters, offset: (page - 1) * AUDIT_PAGE_SIZE };
+    setFilters(next);
+    load(next);
   };
   if (failed && !loading)
     return <LoadFailed what="The audit log" onRetry={() => load()} />;
@@ -1896,8 +1933,8 @@ export function AuditPanel({ onError }) {
     <section className="stacked">
       <section className="stats">
         <article>
-          <span>Visible events</span>
-          <strong>{entries.length}</strong>
+          <span>Matching events</span>
+          <strong>{data?.total ?? 0}</strong>
           <i className="brand">
             <ClipboardList />
           </i>
@@ -1917,7 +1954,7 @@ export function AuditPanel({ onError }) {
           </i>
         </article>
       </section>
-      <section className="table-card">
+      <section className="table-card" ref={listTop}>
         <div className="table-tools">
           <div>
             <h2>Administrator audit trail</h2>
@@ -1983,7 +2020,9 @@ export function AuditPanel({ onError }) {
               className="audit-search"
               onSubmit={(event) => {
                 event.preventDefault();
-                load();
+                const next = { ...filters, offset: 0 };
+                setFilters(next);
+                load(next);
               }}
             >
               <input
@@ -2073,6 +2112,14 @@ export function AuditPanel({ onError }) {
             </tbody>
           </table>
         </div>
+        <Pager
+          page={filters.offset / AUDIT_PAGE_SIZE + 1}
+          pageSize={AUDIT_PAGE_SIZE}
+          total={data?.total || 0}
+          disabled={loading}
+          listRef={listTop}
+          onPage={turnPage}
+        />
       </section>
     </section>
   );

@@ -2867,7 +2867,8 @@ function adminGetAuditLog(filters, adminToken) {
   if (sh.getLastRow() < 2)
     return {
       entries: [], total: 0,
-      integrity: { valid: !expectedHead && !dropped, checkedRows: 0, dropped: dropped, droppedLast: droppedLast }
+      integrity: { valid: !expectedHead && !dropped, checkedRows: 0, dropped: dropped, droppedLast: droppedLast },
+      summary: { logins: 0, failures: 0 }
     };
   var hdr = getHeaderMap_(sh);
   // Raw values, not display values. A cell Sheets turned into a date or a
@@ -2916,8 +2917,16 @@ function adminGetAuditLog(filters, adminToken) {
       (!query || [entry.actor_email, entry.target_id, entry.action, entry.details, entry.request_id].join(' ').toLowerCase().indexOf(query) >= 0);
   });
   var limit = Math.min(500, Math.max(25, Number(filters.limit) || 200));
+  // A page of the matching entries, newest first; offset 0 is the newest.
+  var offset = Math.max(0, Math.floor(Number(filters.offset) || 0));
+  // Across every matching entry, not the page: the tab's figures would
+  // otherwise describe only the rows on screen.
+  var summary = {
+    logins: filtered.filter(function (entry) { return entry.action === 'LOGIN' && entry.outcome === 'SUCCESS'; }).length,
+    failures: filtered.filter(function (entry) { return entry.outcome === 'FAILURE'; }).length
+  };
   return {
-    entries: filtered.slice(-limit).reverse().map(function (entry) {
+    entries: filtered.slice().reverse().slice(offset, offset + limit).map(function (entry) {
       delete entry.previous_hash; delete entry.entry_hash; delete entry.sheetRow;
       try { entry.details = JSON.parse(entry.details || '{}'); } catch (_) { entry.details = {}; }
       return entry;
@@ -2929,6 +2938,7 @@ function adminGetAuditLog(filters, adminToken) {
       dropped: dropped,
       droppedLast: droppedLast
     },
-    total: filtered.length
+    total: filtered.length,
+    summary: summary
   };
 }

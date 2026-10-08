@@ -34,6 +34,7 @@ import { Brand, TurnstileWidget } from "./shared";
 import {
   PanelBoundary,
   LoadFailed,
+  Pager,
   Skeleton,
   SkeletonLines,
   SkeletonRegion,
@@ -1031,7 +1032,11 @@ function OverviewPanel({ period, onError }) {
   );
 }
 
-const PAGE_SIZE = 100;
+/**
+ * Rows per page. At 100 the pager appeared only past 100 records, so on the
+ * office's actual volume it never did and the list was one long scroll.
+ */
+const PAGE_SIZE = 25;
 
 /**
  * What the certificate column's four words mean, said once on the header
@@ -1314,6 +1319,7 @@ function ResponsesPanel({ onError }) {
     [reload, setReload] = useState(0),
     [failed, setFailed] = useState(false),
     [expanded, setExpanded] = useState("");
+  const listTop = useRef(null);
 
   // The sheet is the source of truth for both filtering and paging, so the
   // count on screen is the real number of matches rather than however many
@@ -1346,6 +1352,13 @@ function ResponsesPanel({ onError }) {
       stale = true;
     };
   }, [query, offset, reload]);
+
+  // A page past the end, when a reload finds fewer records than before (a
+  // response moved out of a search), goes back to the last page there is.
+  useEffect(() => {
+    if (!loading && data.total && offset >= data.total)
+      setOffset(Math.floor((data.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+  }, [loading, data.total, offset]);
 
   const rows = data.rows || [];
   const openRow = rows.find((row) => row.referenceId === expanded);
@@ -1402,7 +1415,7 @@ function ResponsesPanel({ onError }) {
     // section: it disables pointer events, and putting it here meant the
     // search box dimmed and stopped accepting input for the duration of the
     // search it had just started.
-    <section className="table-card">
+    <section className="table-card" ref={listTop}>
       <div className="table-tools">
         <div>
           <h2>{query ? "Matching responses" : "All responses"}</h2>
@@ -1605,37 +1618,18 @@ function ResponsesPanel({ onError }) {
           )}
         </ResponseDetails>
       )}
-      {total > PAGE_SIZE && (
-        <div className="pager">
-          <Tip align="start" text="Show the previous 100 records">
-            <button
-              className="mini-button"
-              disabled={offset === 0 || loading}
-              onClick={() => {
-                setExpanded("");
-                setOffset(Math.max(0, offset - PAGE_SIZE));
-              }}
-            >
-              Previous
-            </button>
-          </Tip>
-          <span>
-            {firstShown}–{lastShown} of {total.toLocaleString()}
-          </span>
-          <Tip align="end" text="Show the next 100 records">
-            <button
-              className="mini-button"
-              disabled={lastShown >= total || loading}
-              onClick={() => {
-                setExpanded("");
-                setOffset(offset + PAGE_SIZE);
-              }}
-            >
-              Next
-            </button>
-          </Tip>
-        </div>
-      )}
+      <Pager
+        page={offset / PAGE_SIZE + 1}
+        pageSize={PAGE_SIZE}
+        total={total}
+        disabled={loading}
+        listRef={listTop}
+        onPage={(page) => {
+          setExpanded("");
+          setReclassifying("");
+          setOffset((page - 1) * PAGE_SIZE);
+        }}
+      />
     </section>
   );
 }

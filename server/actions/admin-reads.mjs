@@ -405,6 +405,7 @@ export async function adminGetAuditLog(ctx, filters, token) {
         dropped,
         droppedLast,
       },
+      summary: { logins: 0, failures: 0 },
     };
 
   const secret = process.env.AUDIT_HASH_SECRET || "";
@@ -446,10 +447,13 @@ export async function adminGetAuditLog(ctx, filters, token) {
           .includes(query)),
   );
   const limit = Math.min(500, Math.max(25, Number(filters.limit) || 200));
+  // A page of the matching entries, newest first; offset 0 is the newest.
+  const offset = Math.max(0, Math.trunc(Number(filters.offset) || 0));
   return {
     entries: filtered
-      .slice(-limit)
+      .slice()
       .reverse()
+      .slice(offset, offset + limit)
       .map(({ previous_hash, entry_hash, ...entry }) => {
         let details = {};
         try {
@@ -465,5 +469,13 @@ export async function adminGetAuditLog(ctx, filters, token) {
       droppedLast,
     },
     total: filtered.length,
+    // Across every matching entry, not the page: the tab's figures would
+    // otherwise describe only the 25 rows on screen.
+    summary: {
+      logins: filtered.filter(
+        (entry) => entry.action === "LOGIN" && entry.outcome === "SUCCESS",
+      ).length,
+      failures: filtered.filter((entry) => entry.outcome === "FAILURE").length,
+    },
   };
 }

@@ -187,11 +187,33 @@ describe("adminGetAuditLog", () => {
     { action: "LOGIN", query: "192" },
     { query: "sin1::reads" },
     { limit: 1 },
+    { offset: 2 },
+    { offset: 10000 },
   ])
     test(JSON.stringify(filters), async () => {
       const log = await same("adminGetAuditLog", { filters });
       assert.equal(log.integrity.valid, true);
     });
+
+  test("pages run newest first, and the summary covers every match", async () => {
+    const all = await same("adminGetAuditLog", { filters: { limit: 500 } });
+    const page = await same("adminGetAuditLog", {
+      filters: { limit: 25, offset: 2 },
+    });
+    assert.deepEqual(
+      page.entries.map((entry) => entry.audit_id),
+      all.entries.slice(2, 27).map((entry) => entry.audit_id),
+    );
+    assert.equal(page.total, all.total);
+    assert.deepEqual(page.summary, {
+      logins: all.entries.filter(
+        (entry) => entry.action === "LOGIN" && entry.outcome === "SUCCESS",
+      ).length,
+      failures: all.entries.filter((entry) => entry.outcome === "FAILURE")
+        .length,
+    });
+    assert.ok(page.summary.failures > 0, "the fixture holds a failed sign-in");
+  });
 
   test("a missing head is reported the same way", async () => {
     await db.query(

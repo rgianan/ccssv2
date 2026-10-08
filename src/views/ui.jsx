@@ -108,6 +108,84 @@ export function SkeletonTable({ columns, rows = 6 }) {
  * not load and offers the retry. `inline` is for a list inside a card that
  * stays on screen, where a second card would be a box in a box.
  */
+/**
+ * The page numbers worth a button: the first, the last, and the current page
+ * with its neighbours, with a gap marker between runs that do not meet.
+ */
+function pageList(page, count) {
+  const shown = [
+    ...new Set([1, page - 1, page, page + 1, count].filter(Boolean)),
+  ]
+    .filter((n) => n >= 1 && n <= count)
+    .sort((a, b) => a - b);
+  return shown.flatMap((n, i) =>
+    i && n - shown[i - 1] > 1 ? [`gap-${n}`, n] : [n],
+  );
+}
+
+/**
+ * A long list's pages: which rows are on screen, and the way to the others.
+ *
+ * Nothing at all for a list that fits on one page. `listRef` is the list's
+ * box: a page turned from the pager below a long table opens at its first row
+ * rather than at the bottom of the next.
+ */
+export function Pager({ page, pageSize, total, onPage, disabled, listRef }) {
+  const count = Math.ceil(total / pageSize);
+  if (count <= 1) return null;
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
+  const go = (next) => {
+    onPage(next);
+    if (listRef?.current?.getBoundingClientRect().top < 0)
+      listRef.current.scrollIntoView({ block: "start" });
+  };
+  return (
+    <nav className="pager" aria-label="Pages">
+      <span className="pager-range">
+        {first}–{last} of {total.toLocaleString()}
+      </span>
+      <div className="pager-pages">
+        <button
+          type="button"
+          className="mini-button"
+          disabled={disabled || page <= 1}
+          onClick={() => go(page - 1)}
+        >
+          Previous
+        </button>
+        {pageList(page, count).map((n) =>
+          typeof n === "string" ? (
+            <span key={n} className="pager-gap" aria-hidden="true">
+              …
+            </span>
+          ) : (
+            <button
+              key={n}
+              type="button"
+              className={`mini-button${n === page ? " current" : ""}`}
+              aria-current={n === page ? "page" : undefined}
+              aria-label={`Page ${n}`}
+              disabled={disabled}
+              onClick={() => n !== page && go(n)}
+            >
+              {n}
+            </button>
+          ),
+        )}
+        <button
+          type="button"
+          className="mini-button"
+          disabled={disabled || page >= count}
+          onClick={() => go(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </nav>
+  );
+}
+
 export function LoadFailed({ what, onRetry, inline = false }) {
   const Box = inline ? "div" : "article";
   return (

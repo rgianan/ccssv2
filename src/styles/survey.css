@@ -191,18 +191,6 @@
   align-items: start;
   margin-bottom: 28px;
 }
-.section-heading > span {
-  flex: none;
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  background: #ebf4fc;
-  /* #5277ac read at 4.1:1 on this fill; this keeps the hue at 5.4:1. */
-  color: #3d63a0;
-  border-radius: var(--radius-control);
-  font: 800 var(--text-small) Manrope, sans-serif;
-}
 .section-heading h2 {
   font: 800 var(--text-heading) Manrope, sans-serif;
   margin: 0;
@@ -392,11 +380,15 @@
   font-size: 20px;
   line-height: 1;
 }
-/* 12px at every width: the emoji carries the meaning at a glance, but the
-   words are what tell the middle three apart, and on a phone they were down to
-   9px. Longer labels wrap onto more lines rather than shrink. A Filipino word
-   wider than its column breaks at the soft hyphens in SQD_SCALE; anything else
-   too long breaks anywhere rather than spilling into the next option. */
+/* 12px: the emoji carries the meaning at a glance, but the words are what
+   tell the middle three apart. Longer labels wrap onto more lines rather than
+   shrink. A Filipino word wider than its column breaks at the soft hyphens in
+   SQD_SCALE; anything else too long breaks anywhere rather than spilling into
+   the next option. On a phone the words move to .sqd-caption, below.
+
+   The colour is the tile's own. The global `label small` grey, meant for hints
+   on white, otherwise won on the chosen tile too and read at about 2:1 on its
+   blue. */
 .sqd-option small {
   display: block;
   font-size: var(--text-caption);
@@ -405,6 +397,10 @@
   line-height: 1.25;
   overflow-wrap: anywhere;
   hyphens: auto;
+  color: inherit;
+}
+.sqd-caption {
+  display: none;
 }
 .sqd-option.selected {
   background: var(--blue);
@@ -821,7 +817,7 @@ textarea[aria-invalid="true"] {
   .form-body {
     padding: 24px 18px;
   }
-  /* A step down the scale: beside the number badge, 22px took three lines. */
+  /* A step down the scale: at 22px a step's heading took three lines. */
   .section-heading h2 {
     font-size: var(--text-lead);
   }
@@ -835,8 +831,53 @@ textarea[aria-invalid="true"] {
   .sqd-scale {
     gap: 4px;
   }
+  /* Faces only, one height for all five: the words wrapped to as many as four
+     lines under a tile this narrow, and now sit once in the caption below.
+     They stay in each label for assistive technology. */
   .sqd-option {
-    padding: 9px 2px 7px;
+    min-height: 52px;
+    padding: 0 2px;
+    display: grid;
+    place-items: center;
+  }
+  .sqd-emoji {
+    font-size: 24px;
+  }
+  .sqd-option small {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .sqd-caption {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 8px 0 0;
+    font-size: var(--text-caption);
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--muted-strong);
+  }
+  /* The Filipino ends are long enough to wrap on a small phone; the agree end
+     stays under the face it names. */
+  .sqd-caption span:last-child {
+    text-align: right;
+  }
+  .sqd-caption b {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--blue);
+    font-weight: 800;
+  }
+  .sqd-caption svg {
+    width: 14px;
+    height: 14px;
+    flex: none;
   }
   .review-summary dl > div {
     grid-template-columns: minmax(0, 1fr);

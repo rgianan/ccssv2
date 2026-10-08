@@ -155,6 +155,7 @@ function ChoiceGroup({
 }
 
 function SqdRating({ question, value, onChange, language, invalid = false }) {
+  const chosen = SQD_SCALE.find((option) => option.value === value);
   return (
     <fieldset
       className={`sqd-item${invalid ? " invalid" : ""}`}
@@ -194,6 +195,25 @@ function SqdRating({ question, value, onChange, language, invalid = false }) {
           </label>
         ))}
       </div>
+      {/* Shown only on a phone, where the tiles carry faces alone: wrapped
+          under a 60px tile, "Neither Agree nor Disagree" took four lines and
+          made every question twice as tall. The two ends of the scale are
+          named once, and the answer spelled out once chosen. Hidden from
+          assistive technology, which hears each option's full label from its
+          radio. */}
+      <p className="sqd-caption" aria-hidden="true">
+        {chosen ? (
+          <b>
+            <Check />
+            {t(chosen, language)}
+          </b>
+        ) : (
+          <>
+            <span>{t(SQD_SCALE[0], language)}</span>
+            <span>{t(SQD_SCALE[SQD_SCALE.length - 1], language)}</span>
+          </>
+        )}
+      </p>
     </fieldset>
   );
 }
@@ -309,6 +329,37 @@ export function SurveyForm() {
     selectedService && feesRequiredFor === selectedService.service_id
       ? { ...selectedService, has_fees: true }
       : selectedService;
+  const sqdAsked = sqdApplicable(ratedService);
+  const sqdAnswered = sqdAsked.filter((question) => sqd[question.id]).length;
+
+  /**
+   * After a question's first answer on a phone, brings the next unanswered
+   * one into view. Each question there is a screenful of its own, and the
+   * next one sat below the fold with nothing saying it was there. "nearest"
+   * scrolls only as far as needed, and not at all when it is already on
+   * screen; touch only, since a keyboard moving through a radio group answers
+   * the question on its first arrow press and must not be scrolled away from.
+   */
+  function revealNextSqd(answeredId) {
+    if (
+      !window.matchMedia?.("(max-width: 620px) and (pointer: coarse)").matches
+    )
+      return;
+    const index = sqdAsked.findIndex((question) => question.id === answeredId);
+    const next = sqdAsked
+      .slice(index + 1)
+      .find((question) => !sqd[question.id]);
+    if (!next) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    requestAnimationFrame(() =>
+      document
+        .querySelector(`.sqd-item[data-field="${next.id}"]`)
+        ?.scrollIntoView({
+          block: "nearest",
+          behavior: still ? "auto" : "smooth",
+        }),
+    );
+  }
 
   const serviceOptions = useMemo(
     () =>
@@ -906,7 +957,17 @@ export function SurveyForm() {
               {language === "tl" ? "Hakbang" : "Step"} {step + 1}{" "}
               {language === "tl" ? "ng" : "of"} {STEPS.length}
             </span>
-            <strong>{t(STEPS[step], language)}</strong>
+            {/* The step's name is the heading below, and on a wide screen the
+                list beside the form says it too; here it was a third copy.
+                The free side counts answers on the one step that asks for
+                many of the same kind. */}
+            {step === 3 && (
+              <strong aria-live="polite">
+                {language === "tl"
+                  ? `${sqdAnswered} sa ${sqdAsked.length} ang nasagot`
+                  : `${sqdAnswered} of ${sqdAsked.length} answered`}
+              </strong>
+            )}
           </div>
           <div className="progress">
             <i style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} />
@@ -916,7 +977,6 @@ export function SurveyForm() {
             {step === 0 && (
               <>
                 <div className="section-heading">
-                  <span>01</span>
                   <div>
                     <h2>
                       {language === "tl"
@@ -1085,7 +1145,6 @@ export function SurveyForm() {
             {step === 1 && (
               <>
                 <div className="section-heading">
-                  <span>02</span>
                   <div>
                     <h2>
                       {language === "tl"
@@ -1258,7 +1317,6 @@ export function SurveyForm() {
             {step === 2 && (
               <>
                 <div className="section-heading">
-                  <span>03</span>
                   <div>
                     <h2>
                       {language === "tl"
@@ -1301,7 +1359,6 @@ export function SurveyForm() {
             {step === 3 && (
               <>
                 <div className="section-heading">
-                  <span>04</span>
                   <div>
                     <h2>
                       {language === "tl"
@@ -1319,16 +1376,18 @@ export function SurveyForm() {
                       : "This service carries no fee, so the question about fees is not asked."}
                   </div>
                 )}
-                {sqdApplicable(ratedService).map((question) => (
+                {sqdAsked.map((question) => (
                   <SqdRating
                     key={question.id}
                     invalid={isInvalid(question.id)}
                     question={question}
                     language={language}
                     value={sqd[question.id]}
-                    onChange={(value) =>
-                      setSqd((state) => ({ ...state, [question.id]: value }))
-                    }
+                    onChange={(value) => {
+                      const first = !sqd[question.id];
+                      setSqd((state) => ({ ...state, [question.id]: value }));
+                      if (first) revealNextSqd(question.id);
+                    }}
                   />
                 ))}
               </>
@@ -1337,7 +1396,6 @@ export function SurveyForm() {
             {step === 4 && (
               <>
                 <div className="section-heading">
-                  <span>05</span>
                   <div>
                     <h2>{t(STEPS[4], language)}</h2>
                     <p>

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   Bell,
-  ChevronDown,
+  ChevronRight,
   ClipboardList,
   FileSignature,
   FileSpreadsheet,
@@ -667,10 +667,9 @@ export function AdminDashboard() {
 
       <main className="admin-main">
         <header>
-          <div>
-            <p className="eyebrow">
-              CHED-OSDS · Client Satisfaction Measurement
-            </p>
+          {/* No eyebrow over the title: the sidebar already names the office
+              and the module on every page. */}
+          <div className="page-title">
             <h1>{heading}</h1>
             <p>{sub}</p>
           </div>
@@ -937,23 +936,26 @@ function OverviewPanel({ period, onError }) {
             <p>Overall score and respondent count</p>
           </div>
           <div className="table-scroll">
-            <table>
+            {/* "fit": a half-width card. At the usual 720px minimum the
+                program name filled the view and the two figures the card is
+                for sat out of sight to the right. */}
+            <table className="fit">
               <thead>
                 <tr>
                   <th>Program</th>
-                  <th>Respondents</th>
-                  <th>Overall</th>
+                  <th className="numeric">Respondents</th>
+                  <th className="numeric">Overall</th>
                 </tr>
               </thead>
               <tbody>
                 {(data?.services || []).map((service) => (
                   <tr key={service.code}>
-                    <td>
+                    <td className="program-cell">
                       <strong>{service.code}</strong>
-                      <small>{service.name}</small>
+                      <small title={service.name}>{service.name}</small>
                     </td>
-                    <td>{service.respondents}</td>
-                    <td>
+                    <td className="numeric">{service.respondents}</td>
+                    <td className="numeric">
                       {service.overall ? service.overall.toFixed(2) : "—"}
                     </td>
                   </tr>
@@ -1064,7 +1066,7 @@ const RESPONSE_COLUMNS = [
 ];
 
 /**
- * Reclassifying one response, inside its own expanded row.
+ * Reclassifying one response, inside its details panel.
  *
  * It lives here rather than in the table because it is the one write on a tab
  * that is otherwise a record: the dense rows stay read-only at a glance, and
@@ -1178,6 +1180,129 @@ function ChangeProgram({ row, onDone, onError }) {
   );
 }
 
+/**
+ * One response's answers, in a panel at the side of the table.
+ *
+ * They used to open as a block between two rows, which pushed the rest of the
+ * table down and lost the row it belonged to. Not modal: the table stays
+ * usable, and choosing another reference shows that response here instead.
+ * Focus moves to the heading on opening, and goes back to whatever opened the
+ * panel when it is closed from inside; Escape inside the panel closes it.
+ */
+function ResponseDetails({ row, onClose, children }) {
+  const title = useRef(null),
+    returnTo = useRef(null);
+
+  useEffect(() => {
+    // Back to the row's reference on closing, however the panel was opened:
+    // the Details button is out of the tab order, and Safari does not focus a
+    // button it clicks, so what had focus then may be nowhere near the row.
+    returnTo.current = document.querySelector(
+      '.ref-toggle[aria-controls="response-details"]',
+    );
+    title.current?.focus();
+  }, [row.referenceId]);
+
+  // Only when the panel itself is closed. It also goes when a search or a page
+  // change clears it, and focus taken back to the row then would be pulled out
+  // of the search box, or onto a row about to be replaced.
+  const close = () => {
+    const target = returnTo.current;
+    onClose();
+    requestAnimationFrame(() => {
+      if (target?.isConnected) target.focus();
+    });
+  };
+
+  const client =
+    [row.clientType, row.sex, row.age].filter(Boolean).join(" · ") || "—";
+  return (
+    <section
+      id="response-details"
+      className="response-sheet"
+      role="dialog"
+      aria-labelledby="response-details-title"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        close();
+      }}
+    >
+      <header>
+        <div>
+          <h2 id="response-details-title" tabIndex={-1} ref={title}>
+            {row.referenceId}
+          </h2>
+          <p>{[row.email, row.transactionDate].filter(Boolean).join(" · ")}</p>
+        </div>
+        <button
+          type="button"
+          className="sheet-close"
+          aria-label="Close details"
+          onClick={close}
+        >
+          <X aria-hidden="true" />
+        </button>
+      </header>
+      <div className="sheet-body">
+        <dl className="sheet-facts">
+          <dt>Program</dt>
+          <dd>
+            <strong>{row.serviceCode}</strong> —{" "}
+            {row.otherService || row.serviceName}
+          </dd>
+          <dt>Client</dt>
+          <dd>{client}</dd>
+          <dt>Region</dt>
+          <dd>{row.region || "—"}</dd>
+          <dt>Overall</dt>
+          <dd>{row.overall ? row.overall.toFixed(2) : "—"}</dd>
+          <dt>Certificate</dt>
+          <dd>
+            <span
+              className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus === "REQUESTED" ? "pending" : "disabled"}`}
+            >
+              {row.coaStatus || "NONE"}
+            </span>
+          </dd>
+        </dl>
+        <section>
+          <h3>Citizen's Charter</h3>
+          <div className="answer-grid">
+            {CC_QUESTIONS.map((question) => (
+              <span key={question.id}>
+                <b>{question.number}</b>
+                {row[question.id] || "—"}
+              </span>
+            ))}
+          </div>
+        </section>
+        <section>
+          <h3>Service quality</h3>
+          <ul className="sqd-answers">
+            {SQD_QUESTIONS.map((question) => (
+              <li key={question.id}>
+                <span>
+                  <b>{question.number}</b>{" "}
+                  {question.dimension || "Overall satisfaction"}
+                </span>
+                <strong>{row[question.id] || "—"}</strong>
+              </li>
+            ))}
+          </ul>
+        </section>
+        {row.suggestions && (
+          <section>
+            <h3>Suggestion</h3>
+            <p className="answer-suggestion">{row.suggestions}</p>
+          </section>
+        )}
+        <div className="sheet-reclassify">{children}</div>
+      </div>
+    </section>
+  );
+}
+
 function ResponsesPanel({ onError }) {
   const [data, setData] = useState({ rows: [], total: 0, offset: 0 }),
     [query, setQuery] = useState(""),
@@ -1223,6 +1348,7 @@ function ResponsesPanel({ onError }) {
   }, [query, offset, reload]);
 
   const rows = data.rows || [];
+  const openRow = rows.find((row) => row.referenceId === expanded);
   const total = data.total || 0;
   const firstShown = total ? offset + 1 : 0;
   const lastShown = Math.min(offset + PAGE_SIZE, total);
@@ -1300,7 +1426,7 @@ function ResponsesPanel({ onError }) {
           <Tip
             align="end"
             placement="bottom"
-            text="Searches the whole sheet, not just the page on screen"
+            text="Searches every record, not just the page on screen"
           >
             <button className="mini-button">Search</button>
           </Tip>
@@ -1346,7 +1472,10 @@ function ResponsesPanel({ onError }) {
           <thead>
             <tr>
               {RESPONSE_COLUMNS.map((column, index) => (
-                <th key={index}>
+                <th
+                  key={index}
+                  className={column === "Overall" ? "numeric" : undefined}
+                >
                   {/* align="end" because the column sits at the far side of a
                       scroll container, which clips a centred bubble. */}
                   {column === "COA" ? (
@@ -1364,117 +1493,76 @@ function ResponsesPanel({ onError }) {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <React.Fragment key={row.referenceId}>
-                <tr>
-                  <td>
-                    {/* The reference opens the row. On a phone the table
+              <tr
+                key={row.referenceId}
+                className={
+                  expanded === row.referenceId ? "row-open" : undefined
+                }
+              >
+                <td>
+                  {/* The reference opens the row. On a phone the table
                         scrolls inside its card and Details is the last of
                         eight columns, out of view; the reference is the first
                         thing on the row. */}
-                    <button
-                      type="button"
-                      className="ref-toggle"
-                      aria-expanded={expanded === row.referenceId}
-                      aria-controls={`response-details-${row.referenceId}`}
-                      onClick={() => toggleDetails(row.referenceId)}
-                    >
-                      {row.referenceId}
-                      <ChevronDown aria-hidden="true" />
-                    </button>
-                    <small>{row.email}</small>
-                  </td>
-                  <td>{row.transactionDate}</td>
-                  <td>
-                    <strong>{row.serviceCode}</strong>
-                    <small>{row.otherService || row.serviceName}</small>
-                  </td>
-                  <td>
-                    {row.clientType}
-                    <small>
-                      {[row.sex, row.age].filter(Boolean).join(" · ") || "—"}
-                    </small>
-                  </td>
-                  <td>{row.region}</td>
-                  <td className="numeric">
-                    {row.overall ? row.overall.toFixed(2) : "—"}
-                  </td>
-                  <td>
-                    {/* The explanation lives on the column header, not here.
+                  <button
+                    type="button"
+                    className="ref-toggle"
+                    aria-expanded={expanded === row.referenceId}
+                    aria-controls={
+                      expanded === row.referenceId
+                        ? "response-details"
+                        : undefined
+                    }
+                    onClick={() => toggleDetails(row.referenceId)}
+                  >
+                    {row.referenceId}
+                    <ChevronRight aria-hidden="true" />
+                  </button>
+                  <small>{row.email}</small>
+                </td>
+                <td>{row.transactionDate}</td>
+                <td className="program-cell">
+                  <strong>{row.serviceCode}</strong>
+                  <small title={row.otherService || row.serviceName}>
+                    {row.otherService || row.serviceName}
+                  </small>
+                </td>
+                <td>
+                  {row.clientType}
+                  <small>
+                    {[row.sex, row.age].filter(Boolean).join(" · ") || "—"}
+                  </small>
+                </td>
+                <td>{row.region}</td>
+                <td className="numeric">
+                  {row.overall ? row.overall.toFixed(2) : "—"}
+                </td>
+                <td>
+                  {/* The explanation lives on the column header, not here.
                         A tooltip per row would make every pill a tab stop —
                         a hundred of them, to define a word already spelled
                         out in the cell. */}
-                    <span
-                      className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus === "REQUESTED" ? "pending" : "disabled"}`}
-                    >
-                      {row.coaStatus || "NONE"}
-                    </span>
-                  </td>
-                  <td>
-                    {/* Kept for the mouse, where the end of the row is where
+                  <span
+                    className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus === "REQUESTED" ? "pending" : "disabled"}`}
+                  >
+                    {row.coaStatus || "NONE"}
+                  </span>
+                </td>
+                <td>
+                  {/* Kept for the mouse, where the end of the row is where
                         people look for it; out of the tab order, since the
                         reference already does this and a second stop per row
                         is a hundred more presses of Tab. */}
-                    <button
-                      className="mini-button"
-                      tabIndex={-1}
-                      aria-expanded={expanded === row.referenceId}
-                      onClick={() => toggleDetails(row.referenceId)}
-                    >
-                      {expanded === row.referenceId ? "Hide" : "Details"}
-                    </button>
-                  </td>
-                </tr>
-                {expanded === row.referenceId && (
-                  <tr
-                    className="detail-row"
-                    id={`response-details-${row.referenceId}`}
+                  <button
+                    className="mini-button"
+                    tabIndex={-1}
+                    aria-expanded={expanded === row.referenceId}
+                    onClick={() => toggleDetails(row.referenceId)}
                   >
-                    <td colSpan={8}>
-                      <div className="answer-grid">
-                        {CC_QUESTIONS.map((question) => (
-                          <span key={question.id}>
-                            <b>{question.number}</b>
-                            {row[question.id] || "—"}
-                          </span>
-                        ))}
-                        {SQD_QUESTIONS.map((question) => (
-                          <span key={question.id}>
-                            <b>{question.number}</b>
-                            {row[question.id] || "—"}
-                          </span>
-                        ))}
-                      </div>
-                      {row.suggestions && (
-                        <p className="answer-suggestion">
-                          <b>Suggestion:</b> {row.suggestions}
-                        </p>
-                      )}
-                      {reclassifying === row.referenceId ? (
-                        <ChangeProgram
-                          row={row}
-                          onError={onError}
-                          onDone={(message) => {
-                            setReclassifying("");
-                            setNotice(message);
-                            // The row on screen is from before the move.
-                            setReload((value) => value + 1);
-                          }}
-                        />
-                      ) : (
-                        <button
-                          className="mini-button reclassify-open"
-                          onClick={() => {
-                            setNotice("");
-                            setReclassifying(row.referenceId);
-                          }}
-                        >
-                          <ListChecks size={12} /> Change program
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
+                    {expanded === row.referenceId ? "Hide" : "Details"}
+                  </button>
+                </td>
+              </tr>
             ))}
             {!rows.length && (
               <tr>
@@ -1488,6 +1576,35 @@ function ResponsesPanel({ onError }) {
           </tbody>
         </table>
       </div>
+      {openRow && (
+        <ResponseDetails
+          row={openRow}
+          onClose={() => toggleDetails(openRow.referenceId)}
+        >
+          {reclassifying === openRow.referenceId ? (
+            <ChangeProgram
+              row={openRow}
+              onError={onError}
+              onDone={(message) => {
+                setReclassifying("");
+                setNotice(message);
+                // The row on screen is from before the move.
+                setReload((value) => value + 1);
+              }}
+            />
+          ) : (
+            <button
+              className="mini-button"
+              onClick={() => {
+                setNotice("");
+                setReclassifying(openRow.referenceId);
+              }}
+            >
+              <ListChecks size={12} /> Change program
+            </button>
+          )}
+        </ResponseDetails>
+      )}
       {total > PAGE_SIZE && (
         <div className="pager">
           <Tip align="start" text="Show the previous 100 records">

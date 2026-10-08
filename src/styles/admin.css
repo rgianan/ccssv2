@@ -229,13 +229,20 @@
      scroll sideways. Zero lets the column stay put and the table scroll. */
   min-width: 0;
 }
+/* One row: the title on the left, the period and the bell level with it on the
+   right. The title gives way first, its description wrapping, so the tools stay
+   on the row at a laptop's width; below that they wrap under it as a group. */
 .admin-main > header {
   display: flex;
   justify-content: space-between;
-  align-items: end;
+  align-items: flex-start;
   gap: 20px;
   flex-wrap: wrap;
   margin-bottom: 26px;
+}
+.admin-main > header .page-title {
+  flex: 1 1 280px;
+  min-width: 0;
 }
 .admin-main h1 {
   font: 800 var(--text-title) Manrope, sans-serif;
@@ -246,6 +253,8 @@
   color: var(--muted);
   font-size: var(--text-small);
   margin: 0;
+  /* Beside the period picker the line wraps, and left one word on its own. */
+  text-wrap: pretty;
 }
 .header-tools {
   display: flex;
@@ -578,6 +587,50 @@ form.panel {
   color: var(--blue);
 }
 
+/* The report's two steps, numbered in the order they are done. */
+.step-head {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: nowrap;
+}
+.step-number {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-round);
+  display: grid;
+  place-items: center;
+  background: var(--blue);
+  color: #fff;
+  font: 800 var(--text-small) Manrope, sans-serif;
+}
+.generate-panel .step-head {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+.generate-panel .step-number {
+  background: #fff;
+  color: var(--blue-deep);
+}
+.panel-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.panel-foot p {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
 .search {
   position: relative;
   margin: 0;
@@ -725,9 +778,6 @@ td small {
   height: 14px;
   transition: transform 0.15s;
 }
-.ref-toggle[aria-expanded="true"] svg {
-  transform: rotate(180deg);
-}
 @media (pointer: coarse) {
   .ref-toggle {
     min-height: 44px;
@@ -760,10 +810,38 @@ td small {
   padding: 34px;
   font-style: italic;
 }
+/* One line: wrapped, the primary action dropped under the secondary ones. The
+   table scrolls sideways on a narrow window instead. */
 .row-actions {
   display: flex;
   gap: 5px;
+  flex-wrap: nowrap;
+}
+.row-actions > * {
+  flex: none;
+  white-space: nowrap;
+}
+/* What a certificate request needs said besides the status its tab names. */
+.row-note {
+  display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-top: 8px;
+  max-width: 340px;
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  color: var(--muted-strong);
+}
+.row-note .status-pill {
+  padding: 2px 8px;
+}
+.row-note.failed {
+  color: var(--danger);
+}
+.row-note.changed {
+  /* The pending pill's amber, darkened to 5.6:1 for text on white. */
+  color: #8a5d14;
 }
 .cell-input {
   margin: 0;
@@ -772,11 +850,14 @@ td small {
   width: 110px;
   border-radius: var(--radius-control);
 }
+/* Remarks take what the row leaves, rather than a fixed 240px that pushed the
+   column past the card's edge. */
 .cell-input.wide {
-  width: 240px;
+  width: 100%;
+  min-width: 160px;
 }
-.detail-row td {
-  background: #fafcfa;
+.remarks-column {
+  width: 30%;
 }
 .answer-grid {
   display: grid;
@@ -799,10 +880,157 @@ td small {
   letter-spacing: 0.06em;
 }
 .answer-suggestion {
-  margin: 12px 0 0;
-  font-size: var(--text-caption);
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--cream);
+  border-radius: var(--radius-control);
+  font-size: var(--text-small);
   line-height: 1.65;
   color: #505a6b;
+}
+
+/* ------------------------- Response details panel ------------------------- */
+
+/* At the side of the table rather than inside it: an opened response used to
+   push a block of answers between two rows, and the rest of the table jumped
+   down. Under the tooltips (60) and dialogs (40). */
+.response-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  width: min(440px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-left: 1px solid var(--border);
+  box-shadow: -24px 0 64px rgba(12, 32, 80, 0.13);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.response-sheet > header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 22px 24px 16px;
+  background: #fff;
+  border-bottom: 1px solid #eceff3;
+}
+.response-sheet h2 {
+  margin: 0;
+  font: 800 var(--text-heading) Manrope, sans-serif;
+  color: var(--ink);
+}
+.response-sheet h2:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.response-sheet > header p {
+  margin: 4px 0 0;
+  font-size: var(--text-small);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.sheet-close {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: #fff;
+  color: #3e4c64;
+  cursor: pointer;
+}
+.sheet-close:hover {
+  background: var(--cream);
+}
+.sheet-close:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.sheet-close svg {
+  width: 18px;
+  height: 18px;
+}
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 20px 24px 32px;
+}
+.sheet-body h3 {
+  margin: 0 0 10px;
+  font-size: var(--text-caption);
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted-strong);
+}
+.sheet-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px 14px;
+  font-size: var(--text-small);
+}
+.sheet-facts dt {
+  color: var(--muted-strong);
+  font-weight: 700;
+}
+.sheet-facts dd {
+  margin: 0;
+  color: #2c3951;
+}
+/* Two columns of nine, each with its dimension named: the bare SQD0–SQD8
+   chips asked the reader to know which number meant what. */
+.sqd-answers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+}
+.sqd-answers li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid #eceff3;
+  font-size: var(--text-caption);
+  color: #475163;
+}
+.sqd-answers b {
+  color: var(--blue);
+}
+.sqd-answers strong {
+  color: #2c3951;
+  font-variant-numeric: tabular-nums;
+}
+.sheet-reclassify {
+  padding-top: 18px;
+  border-top: 1px solid #eceff3;
+}
+.sheet-reclassify .reclassify {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+/* The row whose answers the panel shows. */
+.row-open > td {
+  background: #eef4fd;
+}
+.row-open > td:first-child {
+  box-shadow: inset 3px 0 0 var(--blue);
 }
 
 /* The notify toggle in the decline dialog. A label that is otherwise a stacked
@@ -834,9 +1062,6 @@ td small {
 
 /* The one write on an otherwise read-only tab, so it is set apart from the
    answers above it by a rule rather than sitting among them. */
-.reclassify-open {
-  margin-top: 14px;
-}
 .reclassify {
   margin-top: 14px;
   padding-top: 14px;
@@ -1020,6 +1245,26 @@ td small {
 td.numeric,
 .numeric {
   font-variant-numeric: tabular-nums;
+}
+/* And sit at the right of their column, with their heading over them. */
+th.numeric,
+td.numeric {
+  text-align: right;
+}
+
+/* A program under its code: two lines at most, the full name on hover. Names
+   ran to six lines in the counts table, and the code is what people scan. */
+.program-cell small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  max-width: 36ch;
+}
+/* A table in a half-width card, where the usual minimum hid its last columns. */
+table.fit {
+  min-width: 0;
 }
 
 /* A row shown before the server has confirmed it. Tinted rather than dimmed —

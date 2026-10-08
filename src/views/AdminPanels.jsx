@@ -118,15 +118,40 @@ const clearIssueKey = (referenceId) => {
   }
 };
 
-/** Named once, so the placeholder table and the real one cannot drift apart. */
-const COA_COLUMNS = [
-  "Client",
-  "Agency",
-  "Purpose",
-  "Date covered",
-  "Status",
-  "Actions",
-];
+/**
+ * Named once, so the placeholder table and the real one cannot drift apart.
+ * No Status column: each tab holds one status and is named for it, so a pill
+ * per row only repeated the tab. What a row needs said besides — being issued,
+ * why it failed or was declined, edited since issue — goes under the client.
+ */
+const COA_COLUMNS = ["Client", "Agency", "Purpose", "Date covered", "Actions"];
+
+/** The note under a request's client, when its state needs more than its tab. */
+function CoaRowNote({ row }) {
+  if (row.coaStatus === "PROCESSING")
+    return (
+      <span className="row-note">
+        <span className="status-pill pending">Being issued</span>
+        If this stays for more than a few minutes, the attempt was cut off —
+        Generate again.
+      </span>
+    );
+  const failure = String(row.coaError || "")
+    .replace(/^ERROR:?\s*/i, "")
+    .trim();
+  if (row.coaStatus?.startsWith("ERROR") && failure)
+    return <span className="row-note failed">{failure}</span>;
+  if (row.coaStatus === "DECLINED" && row.coaDeclineReason)
+    return <span className="row-note">Reason: {row.coaDeclineReason}</span>;
+  if (row.detailsChanged)
+    return (
+      <span className="row-note changed">
+        Edited since it was issued — reissue to put the changes on the
+        certificate.
+      </span>
+    );
+  return null;
+}
 
 export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
   const [rows, setRows] = useState([]),
@@ -365,54 +390,17 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
                       <small>
                         {row.referenceId} · {row.email}
                       </small>
+                      {/* No tooltip: the note wraps, so the whole message is
+                          already on screen. */}
+                      <CoaRowNote row={row} />
                     </td>
                     <td>{row.coaAgency}</td>
                     <td className="wrap-cell">{row.coaPurpose}</td>
                     <td>{row.coaDateCoverage}</td>
                     <td>
-                      <span
-                        className={`status-pill ${row.coaStatus === "ISSUED" ? "enabled" : row.coaStatus?.startsWith("ERROR") ? "failed" : row.coaStatus === "DECLINED" ? "disabled" : "pending"}`}
-                      >
-                        {row.coaStatus}
-                      </span>
-                      {/* No tooltip: `td small` wraps, so the whole message is already on
-                        screen. A bubble repeating the text under the cursor
-                        would say nothing new. */}
-                      {row.coaError && <small>{row.coaError}</small>}
-                      {row.coaStatus === "PROCESSING" && (
-                        <small>
-                          Being issued. If this stays for more than a few
-                          minutes, the attempt was cut off — Generate again.
-                        </small>
-                      )}
-                      {row.coaStatus === "DECLINED" && row.coaDeclineReason && (
-                        <small>{row.coaDeclineReason}</small>
-                      )}
-                      {row.detailsChanged && (
-                        <small>
-                          Edited since it was issued — reissue to put the
-                          changes on the certificate.
-                        </small>
-                      )}
-                    </td>
-                    <td>
+                      {/* The action the queue exists for comes first, so it
+                          is never the one that wraps onto a second line. */}
                       <div className="row-actions">
-                        <button
-                          className="mini-button"
-                          onClick={() => setEditing({ ...row })}
-                        >
-                          Edit
-                        </button>
-                        {row.coaLink && (
-                          <a
-                            className="mini-button"
-                            href={row.coaLink}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <ExternalLink size={12} /> PDF
-                          </a>
-                        )}
                         {/* A declined request offers the way back instead of
                             the way forward: issuing one the office has
                             refused should take the decision being undone
@@ -429,43 +417,57 @@ export function CertificatePanel({ onError, onQueueChanged = () => {} }) {
                               : "Put back in the queue"}
                           </button>
                         ) : (
-                          <>
-                            {/* Nothing to decline once it is in the client's
-                                hands — the backend refuses that too. */}
-                            {row.coaStatus !== "ISSUED" && (
-                              <button
-                                className="mini-button"
-                                disabled={Boolean(busyId)}
-                                onClick={() => setDeclining({ ...row })}
-                              >
-                                <Ban size={12} /> Decline
-                              </button>
-                            )}
-                            {/* Every row, not just the busy one: issue()
-                                ignores a second click while one is running,
-                                and a button that looks live but does nothing
-                                reads as broken. */}
-                            <button
-                              className="mini-button primary"
-                              disabled={Boolean(busyId)}
-                              onClick={() => issue(row)}
-                            >
-                              <FileSignature size={12} />
-                              {busyId === row.referenceId
-                                ? "Working…"
-                                : row.coaStatus === "ISSUED"
-                                  ? "Reissue"
-                                  : "Generate"}
-                            </button>
-                          </>
+                          // Every row, not just the busy one: issue() ignores a
+                          // second click while one is running, and a button
+                          // that looks live but does nothing reads as broken.
+                          <button
+                            className="mini-button primary"
+                            disabled={Boolean(busyId)}
+                            onClick={() => issue(row)}
+                          >
+                            <FileSignature size={12} />
+                            {busyId === row.referenceId
+                              ? "Working…"
+                              : row.coaStatus === "ISSUED"
+                                ? "Reissue"
+                                : "Generate"}
+                          </button>
                         )}
+                        <button
+                          className="mini-button"
+                          onClick={() => setEditing({ ...row })}
+                        >
+                          Edit
+                        </button>
+                        {row.coaLink && (
+                          <a
+                            className="mini-button"
+                            href={row.coaLink}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <ExternalLink size={12} /> PDF
+                          </a>
+                        )}
+                        {/* Nothing to decline once it is in the client's
+                            hands — the backend refuses that too. */}
+                        {row.coaStatus !== "DECLINED" &&
+                          row.coaStatus !== "ISSUED" && (
+                            <button
+                              className="mini-button"
+                              disabled={Boolean(busyId)}
+                              onClick={() => setDeclining({ ...row })}
+                            >
+                              <Ban size={12} /> Decline
+                            </button>
+                          )}
                       </div>
                     </td>
                   </tr>
                 ))}
                 {!rows.length && !loading && (
                   <tr>
-                    <td colSpan={6} className="empty-cell">
+                    <td colSpan={COA_COLUMNS.length} className="empty-cell">
                       No certificate requests with this status.
                     </td>
                   </tr>
@@ -822,48 +824,42 @@ export function ReportsPanel({ period, onError }) {
     <section className="stacked">
       <Feedback error={error} notice={notice} />
 
+      {/* Two numbered steps, in the order they are done. Save counts used to
+          sit at the top of this card, a screen away from Generate report —
+          which saves the same counts first anyway — so the page offered two
+          buttons for one job and no sign of which came first. */}
       <article className="panel">
-        <div className="panel-head">
+        <div className="panel-head step-head">
+          <span className="step-number" aria-hidden="true">
+            1
+          </span>
           <div>
-            <h2>Counts for {describePeriod(period)}</h2>
+            <h2>Check the counts for {describePeriod(period)}</h2>
             <p>
               Respondents come from the survey. Clients served and volume of
-              transactions are office records, so enter them here before
-              generating the workbook.
+              transactions are office records: enter them here.
             </p>
           </div>
-          <Tip
-            align="end"
-            text="Store these counts against the selected period. The report uses the saved counts."
-          >
-            <button
-              className="button secondary"
-              onClick={persist}
-              disabled={saving}
-            >
-              {saving ? "Saving…" : "Save counts"}
-            </button>
-          </Tip>
         </div>
         <div className="table-scroll">
           <table>
             <thead>
               <tr>
                 <th>Program</th>
-                <th>Respondents</th>
+                <th className="numeric">Respondents</th>
                 <th>No. of clients</th>
                 <th>Volume of transactions</th>
-                <th>Remarks</th>
+                <th className="remarks-column">Remarks</th>
               </tr>
             </thead>
             <tbody>
               {stats.map((row) => (
                 <tr key={row.service_id}>
-                  <td>
+                  <td className="program-cell">
                     <strong>{row.code}</strong>
-                    <small>{row.name_en}</small>
+                    <small title={row.name_en}>{row.name_en}</small>
                   </td>
-                  <td>{row.respondents}</td>
+                  <td className="numeric">{row.respondents}</td>
                   <td>
                     <input
                       type="number"
@@ -924,30 +920,44 @@ export function ReportsPanel({ period, onError }) {
             </tbody>
           </table>
         </div>
+        <div className="panel-foot">
+          <p>
+            Generating saves these counts first, so saving here is only for
+            coming back to them later.
+          </p>
+          <button
+            className="button secondary"
+            onClick={persist}
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Save counts"}
+          </button>
+        </div>
       </article>
 
       <article className="panel generate-panel">
-        <div>
-          <h2>Generate the CSM Summary Report</h2>
-          <p>
-            Produces an Excel workbook in the ARTA layout: a CSM Summary sheet,
-            a DATA sheet, and one worksheet per program for{" "}
-            <b>{describePeriod(period)}</b>.
-          </p>
+        <div className="step-head">
+          <span className="step-number" aria-hidden="true">
+            2
+          </span>
+          <div>
+            <h2>Generate the CSM Summary Report</h2>
+            <p>
+              An Excel workbook in the ARTA layout: a CSM Summary sheet, a DATA
+              sheet, and one worksheet per program for{" "}
+              <b>{describePeriod(period)}</b>. It saves the counts above first,
+              and can take a minute.
+            </p>
+          </div>
         </div>
-        <Tip
-          align="end"
-          text="Saves the counts above first, then builds the workbook. This can take a minute."
+        <button
+          className="button primary large"
+          onClick={build}
+          disabled={generating}
         >
-          <button
-            className="button primary large"
-            onClick={build}
-            disabled={generating}
-          >
-            <FileSpreadsheet size={18} />
-            {generating ? "Generating…" : "Generate report"}
-          </button>
-        </Tip>
+          <FileSpreadsheet size={18} />
+          {generating ? "Generating…" : "Generate report"}
+        </button>
       </article>
 
       <article className="panel">

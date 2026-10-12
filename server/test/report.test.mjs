@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 import { reportInputs } from "../actions/google.mjs";
 import { normalizePeriod } from "../periods.mjs";
-import { buildReportWorkbook, sheetNameFor } from "../report.mjs";
+import { buildReportWorkbook, sheetNameFor, wrappedLines } from "../report.mjs";
 import { applyAnswerPolicy } from "../scores.mjs";
 import { appsScript } from "./apps-script.mjs";
 import { buildDataset, loadIntoDb } from "./dataset.mjs";
@@ -331,5 +331,42 @@ describe("the workbook itself", () => {
     assert.equal(sheetNameFor("", taken), "SERVICE");
     assert.equal(sheetNameFor("x".repeat(40), taken), "X".repeat(26));
     assert.equal(sheetNameFor("X".repeat(30), taken), `${"X".repeat(24)}2`);
+  });
+
+  test("wrapping is counted word by word", () => {
+    assert.equal(wrappedLines("Reliability (Quality)", 17), 2);
+    assert.equal(wrappedLines("Reliability (Quality)\n(SQD2)", 17), 3);
+    assert.equal(wrappedLines("short", 17), 1);
+    assert.equal(wrappedLines("", 17), 1);
+    // A word longer than a line runs on over as many lines as it needs.
+    assert.equal(wrappedLines("x".repeat(40), 17), 3);
+    assert.equal(wrappedLines(`ab ${"x".repeat(40)}`, 17), 4);
+  });
+
+  test("no row is taller than Excel allows, even for the longest suggestion", async () => {
+    const period = normalizePeriod({ type: "quarter", year: 2026, quarter: 3 });
+    const inputs = await reportInputs(db, period);
+    const records = applyAnswerPolicy(inputs.records, inputs.services);
+    // The form keeps 1,500 characters.
+    records[0] = {
+      ...records[0],
+      suggestions: "Please add more chairs. ".repeat(63).slice(0, 1500),
+    };
+    const built = await buildReportWorkbook({
+      period,
+      settings: inputs.settings,
+      services: inputs.services,
+      records,
+      stats: inputs.stats,
+    });
+    const { default: ExcelJS } = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(built.bytes);
+    let tallest = 0;
+    for (const worksheet of workbook.worksheets)
+      worksheet.eachRow((row) => {
+        tallest = Math.max(tallest, row.height || 0);
+      });
+    assert.equal(tallest, 409);
   });
 });

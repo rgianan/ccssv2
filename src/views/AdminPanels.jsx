@@ -974,7 +974,7 @@ export function ReportsPanel({ period, onError }) {
               An Excel workbook in the ARTA layout: a CSM Summary sheet, a DATA
               sheet, and one worksheet per program for{" "}
               <b>{describePeriod(period)}</b>. It saves the counts above first,
-              and can take a minute.
+              and takes a few seconds.
             </p>
           </div>
         </div>

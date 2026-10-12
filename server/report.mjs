@@ -363,11 +363,41 @@ const styleSectionRow = (sheet, row, width) =>
   sheet.range(row, 1, 1, width).bold().fill(BRAND).color(WHITE);
 
 /**
+ * The lines `text` takes wrapped at `perLine` characters, word by word as
+ * Excel wraps it: counting characters alone undercounts, because a word that
+ * does not fit moves whole to the next line.
+ */
+export function wrappedLines(text, perLine) {
+  let lines = 0;
+  for (const paragraph of String(text).split("\n")) {
+    let used = 0;
+    lines++;
+    for (const word of paragraph.split(" ")) {
+      if (!word) continue;
+      const needed = used ? used + 1 + word.length : word.length;
+      if (needed <= perLine) {
+        used = needed;
+        continue;
+      }
+      // A new line, and a word longer than a line runs on over more.
+      if (used) lines++;
+      lines += Math.floor((word.length - 1) / perLine);
+      used = word.length % perLine || perLine;
+    }
+  }
+  return lines;
+}
+
+/** Excel's tallest row, in points; a taller one is refused. */
+const MAX_ROW_HEIGHT = 409;
+
+/**
  * Row heights for wrapped text. Sheets measured each row when it exported the
  * workbook; an .xlsx written directly carries none, and Excel does not grow a
  * row for text wrapping in a merged cell. This estimates each wrapped row's
  * lines from its text and its columns' widths: Arial 10 runs about 6.5px a
- * character and 13 points a line.
+ * character and 13 points a line. A 1,500-character suggestion would ask for
+ * more than Excel allows, so no row is made taller than that.
  */
 function fitWrappedRows(sheet) {
   const { worksheet, widths, merges } = sheet;
@@ -397,15 +427,11 @@ function fitWrappedRows(sheet) {
         1,
         Math.floor(((span?.width ?? pixels(column)) - 8) / 6.5),
       );
-      const needed = text
-        .split("\n")
-        .reduce(
-          (sum, part) => sum + Math.max(1, Math.ceil(part.length / perLine)),
-          0,
-        );
+      const needed = wrappedLines(text, perLine);
       lines = Math.max(lines, Math.ceil(needed / (span?.rows ?? 1)));
     });
-    if (lines > 1) row.height = Math.max(15, lines * 13);
+    if (lines > 1)
+      row.height = Math.min(MAX_ROW_HEIGHT, Math.max(15, lines * 13));
   });
 }
 

@@ -143,7 +143,11 @@ if (reached && options.email) {
 }
 
 if (reached && options.report) {
-  const period = normalizePeriod({ type: "quarter" });
+  // This quarter: normalizePeriod takes the first when none is named.
+  const period = normalizePeriod({
+    type: "quarter",
+    quarter: Math.floor((Number(officeDay().slice(5, 7)) - 1) / 3) + 1,
+  });
   const answers = (score) =>
     Object.fromEntries(
       Array.from({ length: 9 }, (_, i) => [`sqd${i}`, i === 5 ? "N/A" : score]),

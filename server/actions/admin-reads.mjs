@@ -12,6 +12,7 @@ import {
   CC_KEYS,
   RESPONSE_COLUMNS,
   SQD_KEYS,
+  ageBracketOf,
   meanOf,
   responseRecord,
   safeTrim,
@@ -46,21 +47,6 @@ export async function periodRecords(db, period) {
 }
 
 // --------------------------------- Overview -----------------------------------
-
-const AGE_BRACKETS = [
-  { label: "16 & Below (Child)", min: 0, max: 16 },
-  { label: "17-30 (Young Adult)", min: 17, max: 30 },
-  { label: "31-45 (Middle-aged Adult)", min: 31, max: 45 },
-  { label: "Above 45 (Old-aged adult)", min: 46, max: 200 },
-];
-
-function ageBracketOf(age) {
-  const value = Number(age);
-  if (!value || Number.isNaN(value)) return "N/A";
-  return (
-    AGE_BRACKETS.find((b) => value >= b.min && value <= b.max)?.label || "N/A"
-  );
-}
 
 /** Counts by value, in order of first appearance; a blank counts as N/A. */
 function tally(values) {

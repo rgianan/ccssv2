@@ -4,9 +4,10 @@
  * Once the portal's records move to Postgres, Apps Script keeps only what
  * needs Google: making certificate PDFs from the Docs template, emailing them
  * and the decline notice through MailApp (free on the office's Workspace
- * account), building report workbooks, and filing uploaded templates and
- * signatures in Drive. The new backend sends everything each step needs and
- * records the outcome itself; nothing here reads or writes a sheet.
+ * account), and filing the report workbooks the backend builds and the
+ * templates and signatures administrators upload in Drive. The new backend
+ * sends everything each step needs and records the outcome itself; nothing
+ * here reads or writes a sheet.
  *
  * Callable only with the worker token, which the browser-facing proxy never
  * holds. Run setupCsmWorker() once from the editor and copy the token it logs
@@ -18,9 +19,12 @@ var WORKER_ACTIONS_ = {
   workerMintCertificate: workerMintCertificate_,
   workerSendCertificateEmail: workerSendCertificateEmail_,
   workerSendDeclineEmail: workerSendDeclineEmail_,
+  workerSaveReport: workerSaveReport_,
   workerGenerateReport: workerGenerateReport_,
   workerUploadFile: workerUploadFile_
 };
+
+var XLSX_MIME_ = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function isWorkerAction_(action) {
   return Object.prototype.hasOwnProperty.call(WORKER_ACTIONS_, action);
@@ -83,9 +87,15 @@ function workerFolder_(folderId, name) {
   return DriveApp.createFolder(name);
 }
 
-/** Whether the worker answers, and how much email it can still send today. */
+/**
+ * Whether the worker answers, how much email it can still send today, and
+ * what it can do — so a check can tell this version from an older one.
+ */
 function workerPing_() {
-  return { status: 'OK', timezone: timezone_(), mailQuota: MailApp.getRemainingDailyQuota() };
+  return {
+    status: 'OK', timezone: timezone_(), mailQuota: MailApp.getRemainingDailyQuota(),
+    actions: Object.keys(WORKER_ACTIONS_)
+  };
 }
 
 /**
@@ -128,9 +138,33 @@ function workerSendDeclineEmail_(body) {
 }
 
 /**
- * Builds one CSM Summary Report from the records sent. The answer policy is
- * applied here, as buildReport_ applies it, so the workbook reads responses
- * exactly as it always has.
+ * Files a CSM Summary Report the new backend has built (server/report.mjs)
+ * in the reports folder, and shares it with the administrators as
+ * buildReportWorkbook_ shared the one it built. Nothing here reads a record.
+ */
+function workerSaveReport_(body) {
+  var file = body.file || {};
+  if (!file.base64 || !file.filename) throw new Error('No report file was sent.');
+  if (!/\.xlsx$/i.test(file.filename)) throw new Error('A report must be an .xlsx workbook.');
+  var folder = workerFolder_(body.folderId, 'OSDS CSM Reports');
+  var created = folder.createFile(Utilities.newBlob(
+    Utilities.base64Decode(file.base64), XLSX_MIME_, file.filename));
+  return {
+    fileId: created.getId(),
+    name: created.getName(),
+    url: created.getUrl(),
+    accessNote: shareReportWithAdmins_(created, safeTrim_(body.actorEmail), body.adminEmails || []),
+    folderId: folder.getId()
+  };
+}
+
+/**
+ * Builds one CSM Summary Report from the records sent, in a scratch Google
+ * Sheet as Report.gs always has. The backend now builds the workbook itself
+ * and calls workerSaveReport; this stays for a backend deployed before that,
+ * and can go when Report.gs does. The answer policy is applied here, as
+ * buildReport_ applies it, so the workbook reads responses exactly as it
+ * always has.
  */
 function workerGenerateReport_(body) {
   var period = normalizePeriod_(body.period);

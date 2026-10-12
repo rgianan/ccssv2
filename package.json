@@ -20,6 +20,7 @@
     "cutover:check": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/preflight.mjs"
   },
   "dependencies": {
+    "exceljs": "4.4.0",
     "lucide-react": "1.27.0",
     "postgres": "3.4.9",
     "react": "19.2.8",
@@ -30,5 +31,8 @@
     "@electric-sql/pglite-socket": "0.2.11",
     "@vitejs/plugin-react": "6.0.4",
     "vite": "8.1.5"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

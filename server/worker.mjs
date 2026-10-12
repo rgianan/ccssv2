@@ -3,8 +3,9 @@ import { UserError } from "./errors.mjs";
 
 /**
  * The steps that need Google: certificate PDFs from the Docs template, email
- * through MailApp (free on the office's Workspace account), report workbooks,
- * and files kept in Drive. Apps Script does them, in Worker.gs; this calls it.
+ * through MailApp (free on the office's Workspace account), and files kept in
+ * Drive — certificates, report workbooks (built in server/report.mjs),
+ * templates and signatures. Apps Script does them, in Worker.gs; this calls it.
  *
  * The worker holds no records. Each call carries what the step needs and
  * returns what came of it, and the backend does the bookkeeping. It is
@@ -19,6 +20,14 @@ import { UserError } from "./errors.mjs";
  * them before.
  */
 export class WorkerError extends UserError {}
+
+/**
+ * What a worker deployed before workerSaveReport existed answers it with:
+ * doPost does not know the action, so it is checked as a portal request and
+ * fails the portal's token. The backend falls back to having that worker
+ * build the report itself.
+ */
+export const OLDER_WORKER = "Forbidden: invalid submit token.";
 
 const NOT_CONNECTED = "the email service is not connected yet";
 const NOT_CONFIGURED =
@@ -36,6 +45,9 @@ export const disconnectedWorker = {
   },
   async sendDeclineEmail() {
     throw new Error(NOT_CONNECTED);
+  },
+  async saveReport() {
+    throw new WorkerError(NOT_CONFIGURED);
   },
   async generateReport() {
     throw new WorkerError(NOT_CONFIGURED);
@@ -87,6 +99,7 @@ export function appsScriptWorker({ url, token, timeoutMs = 50_000 }) {
       (await call("workerSendCertificateEmail", data)).emailStatus,
     sendDeclineEmail: async (data) =>
       (await call("workerSendDeclineEmail", data)).emailStatus,
+    saveReport: (data) => call("workerSaveReport", data),
     generateReport: (data) => call("workerGenerateReport", data),
     uploadFile: (data) => call("workerUploadFile", data),
   };

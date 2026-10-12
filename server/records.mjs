@@ -35,10 +35,40 @@ export const RESPONSE_COLUMNS = `
   coa_status, coa_link, coa_issued_at, coa_issue_key, coa_issued_details,
   coa_decline_reason, verification_code, verification_url`;
 
+/** The ratings among `values`: 1 to 5. N/A and blanks are not ratings. */
+export const ratingsOf = (values) =>
+  values.map(Number).filter((score) => score >= 1 && score <= 5);
+
 /** N/A and blanks are left out of every CSM average, per the ARTA guidance. */
 export function meanOf(values) {
-  const scores = values.map(Number).filter((score) => score >= 1 && score <= 5);
+  const scores = ratingsOf(values);
   return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+}
+
+/** The middle rating, or the mean of the middle two: medianOf_ in Code.gs. */
+export function medianOf(values) {
+  const scores = ratingsOf(values).sort((a, b) => a - b);
+  if (!scores.length) return 0;
+  const middle = Math.floor(scores.length / 2);
+  return scores.length % 2
+    ? scores[middle]
+    : (scores[middle - 1] + scores[middle]) / 2;
+}
+
+/** The ARTA age brackets, as AGE_BRACKETS_ in Code.gs. */
+export const AGE_BRACKETS = [
+  { label: "16 & Below (Child)", min: 0, max: 16 },
+  { label: "17-30 (Young Adult)", min: 17, max: 30 },
+  { label: "31-45 (Middle-aged Adult)", min: 31, max: 45 },
+  { label: "Above 45 (Old-aged adult)", min: 46, max: 200 },
+];
+
+export function ageBracketOf(age) {
+  const value = Number(age);
+  if (!value || Number.isNaN(value)) return "N/A";
+  return (
+    AGE_BRACKETS.find((b) => value >= b.min && value <= b.max)?.label || "N/A"
+  );
 }
 
 export function responseRecord(row) {

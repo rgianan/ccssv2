@@ -11,6 +11,7 @@ export function googleStubs({ shareRefused = true } = {}) {
     folders: [],
     trashed: [],
     fetched: [],
+    viewers: [],
   };
   let next = 0;
   const id = (prefix) => `${prefix}-${++next}`;
@@ -45,10 +46,16 @@ export function googleStubs({ shareRefused = true } = {}) {
         setSharing: () => {
           if (shareRefused) throw new Error("Sharing is restricted by policy.");
         },
-        addViewer: () => {},
+        addViewer: (email) => log.viewers.push({ file: fileId, email }),
         getOwner: () => ({ getEmail: () => "owner@ched.gov.ph" }),
       };
-      log.files.push({ folder: folderId, id: fileId, name: b.getName() });
+      log.files.push({
+        folder: folderId,
+        id: fileId,
+        name: b.getName(),
+        contentType: b.getContentType(),
+        bytes: b.getBytes(),
+      });
       files.set(fileId, file);
       return file;
     },

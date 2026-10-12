@@ -415,8 +415,9 @@ describe("generating a report", () => {
   let sent;
   beforeEach(() => {
     sent = null;
-    // The workbook builders are the same code the sheet path runs; here the
-    // test only needs to see what reached them.
+    // The sheet builder, for a worker that still builds the report itself:
+    // here the test only needs to see what reached it. report.test.mjs holds
+    // the real one to the workbook built here.
     gas.call(
       `buildReportWorkbook_ = function (period, settings, services, records, stats, folder, actorEmail, adminEmails) {
       __sent({ period: period, records: records, stats: stats, actorEmail: actorEmail, adminEmails: adminEmails, office: settings.office_name });
@@ -425,40 +426,121 @@ describe("generating a report", () => {
       { __sent: (value) => (sent = JSON.parse(JSON.stringify(value))) },
     );
   });
+  const inQuarter = () =>
+    data.responses.filter(
+      (r) =>
+        r.transactionDate >= "2026-07-01" && r.transactionDate < "2026-10-01",
+    );
 
-  test("sends the quarter's records, read through the answer policy", async () => {
+  test("is built here, then filed in Drive and shared by the worker", async () => {
+    const filed = google.log.files.length;
+    const viewers = google.log.viewers.length;
     const reply = await as("admin", {
       action: "adminGenerateReport",
       period: { type: "quarter", year: 2026, quarter: 3 },
     });
     assert.equal(reply.ok, true, reply.error);
-    assert.equal(sent.period.label, "3rd Quarter 2026");
-    const inQuarter = data.responses.filter(
-      (r) =>
-        r.transactionDate >= "2026-07-01" && r.transactionDate < "2026-10-01",
-    );
-    assert.equal(sent.records.length, inQuarter.length);
-    assert.ok(
-      sent.records.every(
-        (r) => r.serviceId === "S-CHARGES" || r.sqd5 === "N/A",
-      ),
-      "SQD5 reads as N/A wherever no fee is charged",
-    );
-    assert.deepEqual(sent.stats["S-CHARGES"], {
-      clients: "40",
-      transactions: "52",
-      remarks: "Peak month",
-    });
-    assert.deepEqual(sent.adminEmails, [
-      "host@ched.gov.ph",
-      "staff@ched.gov.ph",
-    ]);
-    assert.equal(sent.actorEmail, "staff@ched.gov.ph");
+    assert.equal(sent, null, "the worker built nothing");
 
+    const name = "CSM Summary Report — OSDS — 3rd Quarter 2026.xlsx";
+    const [file] = google.log.files.slice(filed);
+    assert.equal(file.name, name);
+    assert.equal(
+      file.contentType,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    assert.deepEqual(
+      google.log.viewers.slice(viewers).map((v) => v.email),
+      ["host@ched.gov.ph", "staff@ched.gov.ph"],
+      "shared with every active administrator",
+    );
+
+    // The bytes the worker filed are the workbook: the quarter's responses
+    // in DATA, and SQD5 read as N/A wherever no fee is charged.
+    const { default: ExcelJS } = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(file.bytes));
+    const dataSheet = workbook.getWorksheet("DATA");
+    assert.equal(dataSheet.rowCount - 1, inQuarter().length);
+    const references = [];
+    dataSheet.eachRow((row, number) => {
+      if (number === 1) return;
+      references.push(row.getCell(21).value);
+      // CEM/CED is S-CHARGES, the one programme with a fee.
+      if (row.getCell(6).value !== "CEM/CED")
+        assert.equal(row.getCell(15).value, "N/A");
+    });
+    assert.deepEqual(
+      references.sort(),
+      inQuarter()
+        .map((r) => r.referenceId)
+        .sort(),
+    );
+
+    const [folder] = await db.query(
+      "select value from csm.settings where key = 'report_folder_id'",
+    );
+    assert.equal(folder.value, file.folder);
     const list = await as("admin", { action: "adminGetReports" });
     assert.equal(list.data[0].report_id, reply.data.report_id);
-    assert.equal(list.data[0].name, "3rd Quarter 2026.xlsx");
+    assert.equal(list.data[0].name, name);
+    assert.equal(list.data[0].url, `https://drive.example/${file.id}`);
     assert.equal(list.data[0].created_by, "staff@ched.gov.ph");
+  });
+
+  test("a worker from before workerSaveReport builds it itself, as it used to", async () => {
+    // As an older Worker.gs answers: not one of its actions, so doPost checks
+    // it as a portal request and refuses the token.
+    gas.props.SUBMIT_SHARED_TOKEN_HASH = "not-the-worker-token";
+    gas.call(
+      "__saved = WORKER_ACTIONS_.workerSaveReport; delete WORKER_ACTIONS_.workerSaveReport",
+    );
+    try {
+      const reply = await as("admin", {
+        action: "adminGenerateReport",
+        period: { type: "quarter", year: 2026, quarter: 3 },
+      });
+      assert.equal(reply.ok, true, reply.error);
+      assert.equal(sent.period.label, "3rd Quarter 2026");
+      assert.equal(sent.records.length, inQuarter().length);
+      assert.ok(
+        sent.records.every(
+          (r) => r.serviceId === "S-CHARGES" || r.sqd5 === "N/A",
+        ),
+        "SQD5 reads as N/A wherever no fee is charged",
+      );
+      assert.deepEqual(sent.stats["S-CHARGES"], {
+        clients: "40",
+        transactions: "52",
+        remarks: "Peak month",
+      });
+      assert.deepEqual(sent.adminEmails, [
+        "host@ched.gov.ph",
+        "staff@ched.gov.ph",
+      ]);
+      assert.equal(sent.actorEmail, "staff@ched.gov.ph");
+      const list = await as("admin", { action: "adminGetReports" });
+      assert.equal(list.data[0].name, "3rd Quarter 2026.xlsx");
+    } finally {
+      gas.call("WORKER_ACTIONS_.workerSaveReport = __saved");
+      delete gas.props.SUBMIT_SHARED_TOKEN_HASH;
+    }
+  });
+
+  test("a worker failure is told, not covered by the older path", async () => {
+    gas.call(
+      "__saved = WORKER_ACTIONS_.workerSaveReport; WORKER_ACTIONS_.workerSaveReport = function () { throw new Error('Drive is full.'); }",
+    );
+    try {
+      const reply = await as("admin", {
+        action: "adminGenerateReport",
+        period: { type: "quarter", year: 2026, quarter: 3 },
+      });
+      assert.equal(reply.error, "Drive is full.");
+      assert.equal(sent, null);
+    } finally {
+      gas.call("WORKER_ACTIONS_.workerSaveReport = __saved");
+    }
   });
 
   test("refuses a period with no responses", async () => {

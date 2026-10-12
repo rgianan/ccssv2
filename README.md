@@ -106,16 +106,18 @@ Ported so far:
   email goes through `server/worker.mjs`, which reaches Google in phase 2.
 
 - Google: `adminGenerateCoa`, `adminGenerateReport`, `adminUploadCoaTemplate`,
-  `adminUploadSignature`. The checks and the register are here; the file
-  itself is made by the Apps Script worker.
+  `adminUploadSignature`. The checks and the register are here. The
+  certificate is made by the Apps Script worker; the report workbook is built
+  here (`server/report.mjs`) and the worker files it in Drive.
 
 ### The Apps Script worker
 
 `google-apps-script/Worker.gs` keeps the steps that need Google: certificate
-PDFs from the Docs template, email through MailApp, report workbooks, and
-uploads to Drive. It holds no records — the backend sends what each step
-needs and records the outcome — and it answers only to `CSM_WORKER_TOKEN`,
-which the browser-facing proxy never holds.
+PDFs from the Docs template, email through MailApp, and files in Drive —
+certificates, the report workbooks the backend builds, and uploaded
+templates and signatures. It holds no records — the backend sends what each
+step needs and records the outcome — and it answers only to
+`CSM_WORKER_TOKEN`, which the browser-facing proxy never holds.
 
 1. Add `Worker.gs` to the Apps Script project beside the other files.
 2. Run `setupCsmWorker()` once from the editor and copy the logged token.
@@ -124,7 +126,27 @@ which the browser-facing proxy never holds.
    project at `GAS_WEB_APP_URL`) in Vercel or `.env`.
 5. `npm run worker:check -- --email you@ched.gov.ph` sends a test decline
    notice; add `--template <Drive file id>` to make and send a test
-   certificate too.
+   certificate too, and `--report` to build a sample report workbook and have
+   the worker file it in Drive.
+
+#### Reports built in Node (phase 5)
+
+The backend builds the CSM Summary Report itself, with exceljs, and sends the
+finished `.xlsx` to the worker's `workerSaveReport`, which files it in the
+reports folder and shares it with the administrators. `Report.gs` built the
+same workbook cell by cell in a scratch Google Sheet, close to the minute a
+request may take; this takes well under a second, plus the upload.
+`server/test/report.test.mjs` holds the two to the same workbook, cell for
+cell, for a quarter, a year and the edge cases in the test data.
+
+To finish the switch, replace `Worker.gs` in the production Apps Script
+project and deploy a new version (same URL). Either order works: a worker
+from before `workerSaveReport` refuses it, and the backend then has that
+worker build the report as before, logging
+`[csm-report] The Apps Script worker predates workerSaveReport`.
+`npm run worker:check` and `npm run cutover:check` say which worker is
+deployed. `Report.gs` stays: the Apps Script backend (for a rollback) and
+that older path still use it.
 
 ### Importing the sheets
 
@@ -281,10 +303,12 @@ year. The workbook contains:
 
 Respondent counts come from the survey. **No. of Clients** and **Volume of
 Transactions** are office records, so enter them on the Reports page before
-generating; they are saved per period in the `ServiceStats` sheet. The names in
-the signature block come from **Settings**.
+generating; they are saved per period (`csm.service_stats`). The names in the
+signature block come from **Settings**.
 
-Generated workbooks are stored in Drive and listed on the Reports page.
+The backend builds the workbook (`server/report.mjs`); the Apps Script worker
+files it in the office's Drive and shares it with the administrators. Generated
+workbooks are listed on the Reports page.
 
 ## Security
 

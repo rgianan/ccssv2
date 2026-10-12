@@ -10,15 +10,19 @@ import { officeDay } from "../dates.mjs";
 import { UserError } from "../errors.mjs";
 import { normalizePeriod } from "../periods.mjs";
 import { safeTrim } from "../records.mjs";
+import { buildReportWorkbook } from "../report.mjs";
+import { applyAnswerPolicy } from "../scores.mjs";
+import { OLDER_WORKER, WorkerError } from "../worker.mjs";
 import { allServices, periodRecords } from "./admin-reads.mjs";
 import { lockedResponse, readSettings } from "./admin-writes.mjs";
 
 /**
  * The four actions that make something in Google: issuing a certificate,
  * generating a report, and uploading a template or signature. The worker
- * (Worker.gs) makes the file; everything else — the checks, the register,
- * the order things happen in — is here, as it was in Certificate.gs and
- * Report.gs.
+ * (Worker.gs) makes the certificate and keeps the files in Drive; the report
+ * workbook is built here (server/report.mjs). Everything else — the checks,
+ * the register, the order things happen in — is here, as it was in
+ * Certificate.gs and Report.gs.
  */
 
 /** Where Drive folders are remembered, as Apps Script named them. */
@@ -239,9 +243,102 @@ export async function adminGenerateCoa(
 // ---------------------------------- Reports -----------------------------------
 
 /**
- * One CSM Summary Report: buildReport_ in Report.gs. One at a time — a build
- * can outlast the browser's patience, and a second click must not make a
- * second workbook.
+ * What a report is built from, read as Report.gs read it: the period's
+ * responses as stored (the answer policy is applied when the workbook is
+ * built), the settings and programmes, the office's counts in the shape
+ * readServiceStats_ gave, and who to share the workbook with.
+ */
+export async function reportInputs(db, period) {
+  const [records, settings, services, statRows, admins] = [
+    await periodRecords(db, period),
+    await readSettings(db),
+    await allServices(db),
+    await db.query(
+      `select service_id, clients, transactions, remarks
+       from csm.service_stats where period_key = $1`,
+      [period.key],
+    ),
+    await db.query(
+      "select email from csm.admin_users where active order by created_at, user_id",
+    ),
+  ];
+  const text = (value) => (value == null ? "" : String(value));
+  const stats = Object.fromEntries(
+    statRows.map((s) => [
+      s.service_id,
+      {
+        clients: text(s.clients),
+        transactions: text(s.transactions),
+        remarks: safeTrim(s.remarks),
+      },
+    ]),
+  );
+  return {
+    records,
+    settings,
+    services,
+    stats,
+    adminEmails: admins.map((a) => a.email),
+  };
+}
+
+/**
+ * The largest workbook the worker can be sent: doPost refuses a request over
+ * six million characters, and the file travels as base64 inside it. About
+ * 4 MB of .xlsx, or tens of thousands of responses.
+ */
+const MAX_REPORT_BASE64 = 5_500_000;
+
+/**
+ * The workbook, built here (server/report.mjs) and filed in Drive by the
+ * worker. A worker deployed before workerSaveReport existed refuses that
+ * action; it is then asked to build the report itself, as it used to, so the
+ * order Apps Script and Vercel are updated in does not matter.
+ */
+async function fileReport(ctx, period, inputs, actorEmail, folderId) {
+  const { settings, services, stats, adminEmails } = inputs;
+  const workbook = await buildReportWorkbook({
+    period,
+    settings,
+    services,
+    records: applyAnswerPolicy(inputs.records, services),
+    stats,
+    now: ctx.now,
+  });
+  const base64 = workbook.bytes.toString("base64");
+  if (base64.length > MAX_REPORT_BASE64)
+    throw new UserError(
+      `This report is too large to file in Drive (${(workbook.bytes.length / 1e6).toFixed(1)} MB). Generate it by quarter instead of for the whole year.`,
+    );
+  try {
+    return await ctx.worker.saveReport({
+      file: { base64, filename: workbook.name },
+      folderId,
+      actorEmail,
+      adminEmails,
+    });
+  } catch (error) {
+    if (!(error instanceof WorkerError) || error.message !== OLDER_WORKER)
+      throw error;
+    console.warn(
+      "[csm-report] The Apps Script worker predates workerSaveReport, so it built this report itself. Update Worker.gs.",
+    );
+    return ctx.worker.generateReport({
+      period: { type: period.type, year: period.year, quarter: period.quarter },
+      settings,
+      services,
+      records: inputs.records,
+      stats,
+      actorEmail,
+      adminEmails,
+      folderId,
+    });
+  }
+}
+
+/**
+ * One CSM Summary Report: buildReport_ in Report.gs. One at a time — a second
+ * click must not make a second workbook.
  */
 export async function adminGenerateReport(ctx, periodInput, token) {
   const session = await requireAdmin(ctx, token);
@@ -257,51 +354,13 @@ export async function adminGenerateReport(ctx, periodInput, token) {
         );
       throw error;
     }
-    const records = await periodRecords(tx, period);
-    if (!records.length)
+    const inputs = await reportInputs(tx, period);
+    if (!inputs.records.length)
       throw new UserError(`There are no responses for ${period.label} yet.`);
 
-    const [settings, services, statRows, admins] = [
-      await readSettings(tx),
-      await allServices(tx),
-      await tx.query(
-        `select service_id, clients, transactions, remarks
-         from csm.service_stats where period_key = $1`,
-        [period.key],
-      ),
-      await tx.query(
-        "select email from csm.admin_users where active order by created_at, user_id",
-      ),
-    ];
-    // In the shape readServiceStats_ gave the workbook builders.
-    const text = (value) => (value == null ? "" : String(value));
-    const stats = Object.fromEntries(
-      statRows.map((s) => [
-        s.service_id,
-        {
-          clients: text(s.clients),
-          transactions: text(s.transactions),
-          remarks: safeTrim(s.remarks),
-        },
-      ]),
-    );
-
-    const built = await ctx.worker.generateReport({
-      period: { type: period.type, year: period.year, quarter: period.quarter },
-      settings,
-      services,
-      records,
-      stats,
-      actorEmail: session.email,
-      adminEmails: admins.map((a) => a.email),
-      folderId: safeTrim(settings[FOLDER_SETTINGS.reports]),
-    });
-    await rememberFolder(
-      tx,
-      FOLDER_SETTINGS.reports,
-      built.folderId,
-      safeTrim(settings[FOLDER_SETTINGS.reports]),
-    );
+    const known = safeTrim(inputs.settings[FOLDER_SETTINGS.reports]);
+    const built = await fileReport(ctx, period, inputs, session.email, known);
+    await rememberFolder(tx, FOLDER_SETTINGS.reports, built.folderId, known);
     const reportId = `RPT-${randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
     await tx.query(
       `insert into csm.reports (report_id, name, period_key, period_label, file_id, url, created_by)

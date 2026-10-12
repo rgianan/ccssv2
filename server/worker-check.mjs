@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { officeDay } from "./dates.mjs";
+import { normalizePeriod } from "./periods.mjs";
+import { buildReportWorkbook } from "./report.mjs";
 import { appsScriptWorker } from "./worker.mjs";
 
 /**
@@ -16,6 +18,11 @@ import { appsScriptWorker } from "./worker.mjs";
  *     (a new "OSDS Certificates of Appearance" folder, unless --folder names
  *     one) and emails it there. Its verification code is not on record, so
  *     its QR code will report it as not valid.
+ *   npm run worker:check -- --report [--email you@ched.gov.ph]
+ *     Builds a sample report workbook here, from three made-up responses,
+ *     and has the worker file it in Drive (a new "OSDS CSM Reports" folder,
+ *     unless --folder names one), shared with --email if given. Delete it
+ *     from Drive afterwards.
  *
  * Reads CSM_WORKER_URL (or GAS_WEB_APP_URL) and CSM_WORKER_TOKEN from .env or
  * .env.local.
@@ -26,6 +33,7 @@ const { values: options } = parseArgs({
     email: { type: "string" },
     template: { type: "string" },
     folder: { type: "string", default: "" },
+    report: { type: "boolean", default: false },
   },
 });
 
@@ -69,7 +77,12 @@ async function step(label, work) {
 
 const reached = await step("worker answers", async () => {
   const pong = await worker.ping();
-  return `zone ${pong.timezone}, ${pong.mailQuota} emails left today`;
+  const files = (pong.actions || []).includes("workerSaveReport");
+  return `zone ${pong.timezone}, ${pong.mailQuota} emails left today, ${
+    files
+      ? "files the report workbooks built here"
+      : "an older Worker.gs that builds reports itself — replace Worker.gs and deploy a new version"
+  }`;
 });
 
 if (reached && options.email) {
@@ -127,4 +140,54 @@ if (reached && options.email) {
         }),
       );
   }
+}
+
+if (reached && options.report) {
+  const period = normalizePeriod({ type: "quarter" });
+  const answers = (score) =>
+    Object.fromEntries(
+      Array.from({ length: 9 }, (_, i) => [`sqd${i}`, i === 5 ? "N/A" : score]),
+    );
+  const records = ["5", "4", "5"].map((score, i) => ({
+    referenceId: `CSM-WORKERTEST${i + 1}`,
+    transactionDate: officeDay(),
+    month: "TEST",
+    clientType: "CITIZEN",
+    sex: i % 2 ? "MALE" : "FEMALE",
+    age: String(20 + i * 10),
+    regionCode: "NCR",
+    serviceId: "S-TEST",
+    serviceCode: "TEST",
+    cc1: "1",
+    cc2: "1",
+    cc3: "1",
+    ...answers(score),
+    email: `sample${i + 1}@example.invalid`,
+    suggestions: i === 0 ? "Sample response, made up by worker:check." : "",
+  }));
+  await step("sample report built here and filed in Drive", async () => {
+    const built = await buildReportWorkbook({
+      period: { ...period, label: `${period.label} (worker check)` },
+      settings,
+      services: [
+        {
+          service_id: "S-TEST",
+          code: "TEST",
+          name_en: "Worker check — sample responses only",
+          category: "main",
+          active: true,
+          has_fees: false,
+        },
+      ],
+      records,
+      stats: {},
+    });
+    const saved = await worker.saveReport({
+      file: { base64: built.bytes.toString("base64"), filename: built.name },
+      folderId: options.folder,
+      actorEmail: options.email || "",
+      adminEmails: [],
+    });
+    return `${saved.url} (folder ${saved.folderId})${saved.accessNote ? ` — ${saved.accessNote}` : ""}`;
+  });
 }

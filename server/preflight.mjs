@@ -139,6 +139,16 @@ else
       "the Apps Script worker answers",
       `${pong.mailQuota} emails left today`,
     );
+    // Phase 5: reports are built here and filed by workerSaveReport. An older
+    // Worker.gs still makes them itself, slowly; this says it needs replacing.
+    const files = (pong.actions || []).includes("workerSaveReport");
+    report(
+      files,
+      "the worker files the report workbooks built here",
+      files
+        ? ""
+        : "an older Worker.gs — reports still work, built by the worker as before; replace Worker.gs and deploy a new version",
+    );
     report(
       !env("CSM_WORKER_URL") ||
         env("CSM_WORKER_URL") === env("GAS_WEB_APP_URL"),
